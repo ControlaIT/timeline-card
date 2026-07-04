@@ -4,6 +4,7 @@ import enGB from './locales/en-GB.json';
 import enUS from './locales/en-US.json';
 import fr from './locales/fr.json';
 import it from './locales/it.json';
+import nl from './locales/nl.json';
 import pl from './locales/pl.json';
 import ptBR from './locales/pt-BR.json';
 import ru from './locales/ru.json';
@@ -31,6 +32,7 @@ const translations = {
   'en-us': enUS,
   fr,
   it,
+  nl,
   pl,
   'pt-br': ptBR,
   ru,

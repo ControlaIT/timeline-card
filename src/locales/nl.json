@@ -1,0 +1,65 @@
+{
+  "time": {
+    "seconds": "voor enkele seconden",
+    "minutes": "{n} minuten geleden",
+    "hours": "{n} uur geleden",
+    "days": "{n} dagen geleden"
+  },
+  "status": {
+    "locked": "vergrendeld",
+    "unlocked": "ontgrendeld",
+    "open": "open",
+    "closed": "gesloten",
+    "on": "aan",
+    "off": "uit",
+    "home": "thuis",
+    "not_home": "afwezig",
+    "idle": "inactief",
+    "running": "draait",
+    "paused": "gepauzeerd",
+    "stopped": "gestopt",
+    "pending": "uitgesteld",
+    "unknown": "onbekend",
+    "unavailable": "niet beschikbaar",
+    "detected": "gedetecteerd",
+    "clear": "vrij",
+    "online": "online",
+    "offline": "offline",
+    "playing": "afspelen",
+    "buffering": "bufferen",
+    "standby": "paraat",
+    "cleaning": "reinigen",
+    "returning": "terugkeren",
+    "docked": "gekoppeld",
+    "charging": "opladen",
+    "error": "fout",
+    "spot_cleaning": "plaatselijke reiniging",
+    "edge_cleaning": "rand reiniging",
+    "mopping": "dwijlen",
+    "locating": "lokaliseren",
+    "moving": "in beweging",
+    "stuck": "vastgelopen",
+    "disarmed": "gedeactiveerd",
+    "armed_home": "actief (Thuis)",
+    "armed_away": "actief (Afwezig)",
+    "armed_night": "actief (Nacht)",
+    "armed_custom_bypass": "actief (Gepersonaliseerd)",
+    "arming": "geactiveerd",
+    "disarming": "gedeactiveerd",
+    "triggered": "getriggerd"
+  },
+  "ui": {
+    "show_more": "Toon {n} meer",
+    "show_less": "Toon minder",
+    "no_events": "Geen gebeurtenissen gedurende deze periode."
+  },
+  "date_format": {
+    "datetime": {
+      "day": "2-digit",
+      "month": "2-digit",
+      "year": "numeric",
+      "hour": "2-digit",
+      "minute": "2-digit"
+    }
+  }
+}

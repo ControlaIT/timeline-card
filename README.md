@@ -166,7 +166,7 @@ entities:
 | `show_names`               | boolean | no       | true       | Show entity names                                                                                                   |
 | `show_states`              | boolean | no       | true       | Show entity states                                                                                                  |
 | `show_icons`               | boolean | no       | true       | Show entity icons                                                                                                   |
-| `language`                 | string  | no       | auto       | Language code (default `en-US`; supports `cs`, `en-US`, `en-GB`, `de`, `fr`, `it`, `pl`, `pt-BR`, `ru`, `sv`, etc.) |
+| `language`                 | string  | no       | auto       | Language code (default `en-US`; supports `cs`, `en-US`, `en-GB`, `de`, `fr`, `it`, `nl`, `pl`, `pt-BR`, `ru`, `sv`) |
 | `refresh_interval`         | number  | no       | -          | Auto-refresh interval in seconds (background refresh)                                                               |
 | `allow_multiline`          | boolean | no       | false      | Enables automatic multiline wrapping for long names/states                                                          |
 | `force_multiline`          | boolean | no       | false      | Always place the state on a new line below the name                                                                 |
@@ -400,6 +400,7 @@ Available translations:
 - German
 - French
 - Italian
+- Dutch
 - Polish
 - Brazilian Portuguese
 - Russian

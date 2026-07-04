@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.11.0
+
+- Added Dutch translations by **@VGrol**, Thank you!
+- Added per-entity `name_color_map` option to set the displayed entity name color based on the raw state
+
 ## v1.10.0
 
 - Added Polish translations by **@Bagerian**, Thank you!

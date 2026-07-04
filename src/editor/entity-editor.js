@@ -317,6 +317,19 @@ class TimelineCardEntityEditor extends LitElement {
                   cfg.icon_color_map
                 )}
               </div>
+
+              <div class="tc-setting-block">
+                <div class="tc-setting-label">
+                  <div class="tc-setting-title">Name color map</div>
+                  <div class="tc-setting-description">
+                    Name color per raw state.
+                  </div>
+                </div>
+                ${this._renderColorMapEditor(
+                  'name_color_map',
+                  cfg.name_color_map
+                )}
+              </div>
             </div>
           </div>
         </div>

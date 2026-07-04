@@ -259,6 +259,9 @@ entities:
     icon_color: '#ffcc00'
     state_color: '#00aaff'
     name_color: '#ffaa00'
+    name_color_map:
+      on: '#44ff44'
+      off: '#ff4444'
     icon_color_map:
       on: '#ff4444'
       off: '#44ff44'
@@ -290,6 +293,7 @@ entities:
 | `exclude_states`           | list    | Hide events with these raw states (alternative to `include_states`)                             |
 | `show_entity_picture`      | boolean | Show the entity picture instead of the icon when available                                      |
 | `name_color`               | string  | Name color override (fallback: card -> theme)                                                   |
+| `name_color_map`           | object  | Raw state -> name color mapping (fallback: entity name color -> card -> theme)                  |
 | `state_color`              | string  | State color override (fallback: card -> theme)                                                  |
 | `collapse_duplicates`      | boolean | Removes consecutive events with the same state for this entity only (overrides global setting). |
 | `collapse_duplicates_keep` | string  | Which event to keep when collapsing: `earliest` or `latest` (overrides global setting).         |

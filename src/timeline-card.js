@@ -24,6 +24,7 @@ import { getCachedHistory, setCachedHistory } from './history-cache.js';
 
 // Unified state transformer for both history + live
 import { transformState } from './state-transform.js';
+import { resolveStateMappedColor } from './color-engine.js';
 
 const translations = {
   cs,
@@ -459,8 +460,13 @@ class TimelineCard extends HTMLElement {
         const showEntityPicture =
           this.showIcons && entityCfg.show_entity_picture && entityPicture;
 
-        // COLOR RESOLUTION: entity → card → theme/css
-        const nameColor = entityCfg.name_color || this.nameColor || '';
+        // COLOR RESOLUTION: entity state map → entity → card → theme/css
+        const nameColor = resolveStateMappedColor(
+          item.raw_state,
+          entityCfg.name_color_map,
+          entityCfg.name_color,
+          this.nameColor
+        );
         const stateColor = entityCfg.state_color || this.stateColor || '';
 
         const renderEventBox = () => `

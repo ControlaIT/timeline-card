@@ -40,11 +40,12 @@ class TimelineCardGeneralSettings extends LitElement {
                   <div class="tc-setting-title">Title</div>
                   <div class="tc-setting-description">Optional card title.</div>
                 </div>
-                <ha-textfield
+                <input
+                  class="tc-text-input"
                   style="min-width: 200px; width: 280px; max-width: 280px;"
                   .value=${cfg.title || ''}
                   @input=${(e) => this._onTextChange('title', e.target.value)}
-                ></ha-textfield>
+                />
               </div>
 
               <!-- LANGUAGE -->
@@ -90,14 +91,15 @@ class TimelineCardGeneralSettings extends LitElement {
                     Optional auto-refresh interval in seconds.
                   </div>
                 </div>
-                <ha-textfield
+                <input
+                  class="tc-text-input"
                   type="number"
                   min="1"
                   style="width: 140px;"
                   .value=${cfg.refresh_interval ?? ''}
                   @input=${(e) =>
                     this._onNumberChange('refresh_interval', e.target.value)}
-                ></ha-textfield>
+                />
               </div>
             </div>
           </div>
@@ -118,13 +120,14 @@ class TimelineCardGeneralSettings extends LitElement {
                     Number of hours of history to fetch.
                   </div>
                 </div>
-                <ha-textfield
+                <input
+                  class="tc-text-input"
                   type="number"
                   min="1"
                   style="width: 140px;"
                   .value=${cfg.hours ?? ''}
                   @input=${(e) => this._onNumberChange('hours', e.target.value)}
-                ></ha-textfield>
+                />
               </div>
 
               <!-- LIMIT -->
@@ -135,13 +138,14 @@ class TimelineCardGeneralSettings extends LitElement {
                     Max number of events to display.
                   </div>
                 </div>
-                <ha-textfield
+                <input
+                  class="tc-text-input"
                   type="number"
                   min="1"
                   style="width: 140px;"
                   .value=${cfg.limit ?? ''}
                   @input=${(e) => this._onNumberChange('limit', e.target.value)}
-                ></ha-textfield>
+                />
               </div>
             </div>
           </div>
@@ -166,7 +170,8 @@ class TimelineCardGeneralSettings extends LitElement {
                           Show this many before "Show more".
                         </div>
                       </div>
-                      <ha-textfield
+                      <input
+                        class="tc-text-input"
                         type="number"
                         min="1"
                         style="width: 140px;"
@@ -176,7 +181,7 @@ class TimelineCardGeneralSettings extends LitElement {
                             'visible_events',
                             e.target.value
                           )}
-                      ></ha-textfield>
+                      />
                     </div>
                   `
                 : ''}
@@ -223,12 +228,13 @@ class TimelineCardGeneralSettings extends LitElement {
                           Limit card height (e.g. 220px or 14rem).
                         </div>
                       </div>
-                      <ha-textfield
+                      <input
+                        class="tc-text-input"
                         style="width: 180px;"
                         .value=${cfg.max_height ?? ''}
                         @input=${(e) =>
                           this._onTextChange('max_height', e.target.value)}
-                      ></ha-textfield>
+                      />
                     </div>
                   `
                 : ''}

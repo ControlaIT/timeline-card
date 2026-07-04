@@ -4,6 +4,7 @@
 
 - Added Dutch translations by **@VGrol**, Thank you!
 - Added per-entity `name_color_map` option to set the displayed entity name color based on the raw state
+- Fixed missing text fields in the Home Assistant UI editor by replacing internal `ha-textfield` usage with native inputs
 
 ## v1.10.0
 

@@ -88,11 +88,12 @@ class TimelineCardEntityEditor extends LitElement {
                   <div class="tc-setting-title">Custom name</div>
                 </div>
 
-                <ha-textfield
+                <input
+                  class="tc-text-input"
                   style="min-width: 200px; width: 280px; max-width: 280px;"
                   .value=${cfg.name || ''}
                   @input=${(e) => this._updateField('name', e.target.value)}
-                ></ha-textfield>
+                />
               </div>
 
               <!-- CUSTOM ICON -->
@@ -251,13 +252,14 @@ class TimelineCardEntityEditor extends LitElement {
                     Only show events where the numeric state is ≥ this value.
                   </div>
                 </div>
-                <ha-textfield
+                <input
+                  class="tc-text-input"
                   type="number"
                   style="width: 140px;"
                   .value=${cfg.min_value ?? ''}
                   @input=${(e) =>
                     this._updateNumberField('min_value', e.target.value)}
-                ></ha-textfield>
+                />
               </div>
 
               <!-- MAX VALUE -->
@@ -268,13 +270,14 @@ class TimelineCardEntityEditor extends LitElement {
                     Only show events where the numeric state is ≤ this value.
                   </div>
                 </div>
-                <ha-textfield
+                <input
+                  class="tc-text-input"
                   type="number"
                   style="width: 140px;"
                   .value=${cfg.max_value ?? ''}
                   @input=${(e) =>
                     this._updateNumberField('max_value', e.target.value)}
-                ></ha-textfield>
+                />
               </div>
             </div>
           </div>
@@ -473,21 +476,22 @@ class TimelineCardEntityEditor extends LitElement {
           : entries.map(
               ([state, value]) => html`
                 <div class="tc-map-row tc-map-row-icon">
-                  <ha-textfield
-                    class="tc-map-key"
-                    label="State"
+                  <input
+                    class="tc-text-input tc-map-key"
+                    aria-label="State"
+                    placeholder="State"
                     .value=${state}
                     @input=${(e) =>
                       this._onMapKeyChange(mapKey, state, e.target.value)}
-                  ></ha-textfield>
-                  <ha-textfield
-                    class="tc-map-value"
-                    label="Value"
+                  />
+                  <input
+                    class="tc-text-input tc-map-value"
+                    aria-label="Value"
                     .value=${value}
                     placeholder=${placeholder}
                     @input=${(e) =>
                       this._updateMap(mapKey, state, e.target.value)}
-                  ></ha-textfield>
+                  />
                   <button
                     class="tc-icon-button"
                     title="Remove entry"
@@ -529,13 +533,14 @@ class TimelineCardEntityEditor extends LitElement {
           : entries.map(
               ([state, value]) => html`
                 <div class="tc-map-row">
-                  <ha-textfield
-                    class="tc-map-key"
-                    label="State"
+                  <input
+                    class="tc-text-input tc-map-key"
+                    aria-label="State"
+                    placeholder="State"
                     .value=${state}
                     @input=${(e) =>
                       this._onMapKeyChange(mapKey, state, e.target.value)}
-                  ></ha-textfield>
+                  />
                   <ha-icon-picker
                     class="tc-map-icon"
                     .value=${value}
@@ -576,13 +581,14 @@ class TimelineCardEntityEditor extends LitElement {
           : entries.map(
               ([state, value]) => html`
                 <div class="tc-map-row tc-map-row-color">
-                  <ha-textfield
-                    class="tc-map-key"
-                    label="State"
+                  <input
+                    class="tc-text-input tc-map-key"
+                    aria-label="State"
+                    placeholder="State"
                     .value=${state}
                     @input=${(e) =>
                       this._onMapKeyChange(mapKey, state, e.target.value)}
-                  ></ha-textfield>
+                  />
                   ${this._renderMapColorPicker(mapKey, state, value)}
                   <button
                     class="tc-icon-button"

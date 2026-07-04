@@ -400,7 +400,7 @@ Available translations:
 - German
 - French
 - Italian
-- Nederlands
+- Dutch
 - Polish
 - Brazilian Portuguese
 - Russian

@@ -117,6 +117,20 @@ class TimelineCardEntityEditor extends LitElement {
                 cfg.show_entity_picture ?? null
               )}
 
+              <!-- VISIBILITY OVERRIDES -->
+              <div class="tc-setting-block">
+                <div class="tc-setting-label">
+                  <div class="tc-setting-title">Visibility</div>
+                  <div class="tc-setting-description">
+                    Override the card's show name/state/icon settings for this
+                    entity only.
+                  </div>
+                </div>
+                ${this._visibilityRow('Name', 'show_names', cfg.show_names)}
+                ${this._visibilityRow('State', 'show_states', cfg.show_states)}
+                ${this._visibilityRow('Icon', 'show_icons', cfg.show_icons)}
+              </div>
+
               <!-- COLORS -->
               <div class="tc-setting-block">
                 <div class="tc-setting-label">
@@ -381,7 +395,9 @@ class TimelineCardEntityEditor extends LitElement {
     `;
   }
 
-  _selectRow(title, description, key, value, options) {
+  // `onChange` lets a caller map the raw <select> string to something else
+  // (booleans, undefined); without it the string is stored as-is.
+  _selectRow(title, description, key, value, options, onChange) {
     return html`
       <div class="tc-setting-row">
         <div class="tc-setting-label">
@@ -400,7 +416,8 @@ class TimelineCardEntityEditor extends LitElement {
             font-size: 13px;
           "
           .value=${value}
-          @change=${(e) => this._onSelectChange(key, e)}
+          @change=${(e) =>
+            onChange ? onChange(e) : this._onSelectChange(key, e)}
         >
           ${options.map(
             (opt) =>
@@ -411,6 +428,29 @@ class TimelineCardEntityEditor extends LitElement {
         </select>
       </div>
     `;
+  }
+
+  // Three states, not a switch: the card defaults these to ON, so an unset
+  // entity rendered as an off switch would claim the opposite of what's on
+  // screen — and there'd be no way back to inheriting once toggled.
+  _visibilityRow(title, key, value) {
+    return this._selectRow(
+      title,
+      '',
+      key,
+      value === true ? 'true' : value === false ? 'false' : '',
+      [
+        { value: '', label: 'Inherit from card' },
+        { value: 'true', label: 'Show' },
+        { value: 'false', label: 'Hide' },
+      ],
+      (ev) => this._onVisibilityChange(key, ev)
+    );
+  }
+
+  _onVisibilityChange(key, ev) {
+    const raw = ev.target.value;
+    this._updateField(key, raw === '' ? undefined : raw === 'true');
   }
 
   _onToggle(key, ev) {

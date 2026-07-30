@@ -36,7 +36,7 @@ import {
   formatDayLabel,
   formatDayDate,
 } from './day-engine.js';
-import { toCssLength } from './config-engine.js';
+import { resolveEventDisplay, toCssLength } from './config-engine.js';
 import { handleTapAction, resolveActionConfig } from './action-engine.js';
 
 const translations = {
@@ -485,7 +485,10 @@ class TimelineCard extends HTMLElement {
       newState,
       this.hassInst,
       this.entities,
-      this.i18n
+      this.i18n,
+      // The event just happened, so the current states ARE the states at its
+      // point in time — no history lookup needed on this path.
+      (id) => this.hassInst?.states?.[id] ?? null
     );
 
     if (!item) return;
@@ -612,9 +615,20 @@ class TimelineCard extends HTMLElement {
             : 'left';
 
       const entityCfg = item.entityCfg || {};
+
+      // Card-wide defaults, overridable per entity.
+      const { showNames, showStates, showIcons } = resolveEventDisplay(
+        entityCfg,
+        {
+          showNames: this.showNames,
+          showStates: this.showStates,
+          showIcons: this.showIcons,
+        }
+      );
+
       const entityPicture = item.entity_picture;
       const showEntityPicture =
-        this.showIcons && entityCfg.show_entity_picture && entityPicture;
+        showIcons && entityCfg.show_entity_picture && entityPicture;
 
       // COLOR RESOLUTION: entity state map → entity → card → theme/css
       const nameColor = resolveStateMappedColor(
@@ -628,7 +642,7 @@ class TimelineCard extends HTMLElement {
       const renderEventBox = () => `
         <div class="${eventBoxClassName}" data-entity-id="${item.id}">
           ${
-            this.showIcons
+            showIcons
               ? showEntityPicture
                 ? `<img class="entity-picture" src="${entityPicture}" alt="">`
                 : `<ha-icon icon="${item.icon}" style="color:${item.icon_color};"></ha-icon>`
@@ -637,15 +651,15 @@ class TimelineCard extends HTMLElement {
           <div class="text">
             <div class="row">
               ${
-                this.showNames
+                showNames
                   ? `<div class="primary-text name" style="${
                       nameColor ? `color:${nameColor};` : ''
                     }">${item.name}</div>`
                   : ``
               }
               ${
-                this.showStates
-                  ? this.showNames
+                showStates
+                  ? showNames
                     ? `<div class="secondary-text state" style="${
                         stateColor ? `color:${stateColor};` : ''
                       }">${item.state}</div>`

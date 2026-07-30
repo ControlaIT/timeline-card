@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { getCustomConfig, toCssLength } from '../src/config-engine.js';
+import {
+  getCustomConfig,
+  resolveEventDisplay,
+  toCssLength,
+} from '../src/config-engine.js';
 
 describe('getCustomConfig', () => {
   it('returns the matching entity config', () => {
@@ -10,6 +14,57 @@ describe('getCustomConfig', () => {
 
   it('returns an empty object for an unconfigured entity', () => {
     expect(getCustomConfig('light.missing', [])).toEqual({});
+  });
+});
+
+describe('resolveEventDisplay', () => {
+  const cardShowsAll = {
+    showNames: true,
+    showStates: true,
+    showIcons: true,
+  };
+
+  it('inherits the card settings when the entity says nothing', () => {
+    expect(resolveEventDisplay({}, cardShowsAll)).toEqual(cardShowsAll);
+    expect(resolveEventDisplay(undefined, cardShowsAll)).toEqual(cardShowsAll);
+  });
+
+  it('lets an entity hide just its state while the card shows everything', () => {
+    // The reason this option exists.
+    expect(resolveEventDisplay({ show_states: false }, cardShowsAll)).toEqual({
+      showNames: true,
+      showStates: false,
+      showIcons: true,
+    });
+  });
+
+  it('lets an entity show something the card hides', () => {
+    const cardHidesAll = {
+      showNames: false,
+      showStates: false,
+      showIcons: false,
+    };
+
+    expect(resolveEventDisplay({ show_icons: true }, cardHidesAll)).toEqual({
+      showNames: false,
+      showStates: false,
+      showIcons: true,
+    });
+  });
+
+  it('does not let an explicit false read as "unset"', () => {
+    // `||` would silently turn this back into the card's `true`.
+    expect(
+      resolveEventDisplay(
+        { show_names: false, show_states: false, show_icons: false },
+        cardShowsAll
+      )
+    ).toEqual({ showNames: false, showStates: false, showIcons: false });
+  });
+
+  it('defaults to showing everything with no card settings at all', () => {
+    expect(resolveEventDisplay({}, {})).toEqual(cardShowsAll);
+    expect(resolveEventDisplay()).toEqual(cardShowsAll);
   });
 });
 

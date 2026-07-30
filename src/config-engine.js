@@ -8,6 +8,21 @@ export function getCustomConfig(entity_id, entities) {
 }
 
 // ------------------------------------
+// PER-EVENT VISIBILITY
+// ------------------------------------
+// `show_names` / `show_states` / `show_icons` are card-wide defaults that an
+// entity may override — "show everything, except don't bother with the state of
+// this one". Absent on the entity means inherit, so `??` rather than `||`:
+// `show_states: false` has to win over a card default of true.
+export function resolveEventDisplay(cfg, cardDefaults = {}) {
+  return {
+    showNames: cfg?.show_names ?? cardDefaults.showNames ?? true,
+    showStates: cfg?.show_states ?? cardDefaults.showStates ?? true,
+    showIcons: cfg?.show_icons ?? cardDefaults.showIcons ?? true,
+  };
+}
+
+// ------------------------------------
 // CSS LENGTH OPTIONS
 // ------------------------------------
 // Normalises a length option (`event_width`, `max_height`) to a CSS length.

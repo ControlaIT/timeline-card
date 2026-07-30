@@ -1,3 +1,8 @@
+import {
+  shouldIgnoreUnavailable,
+  stripUnavailableArtifacts,
+} from './availability-filter.js';
+
 // ------------------------------------
 // NEW: Collapse consecutive duplicates
 // ------------------------------------
@@ -14,6 +19,28 @@ function collapseDuplicates(list, entities, globalConfig) {
       cfg.collapse_duplicates ?? globalConfig.collapse_duplicates ?? false;
 
     if (!collapse) {
+      // Logbook parity, second half of the rule quoted in availability-filter.js:
+      // `States.state != OLD_STATE.state`. A row repeating the previous value of
+      // the same entity is not a state change, whatever produced it — and on
+      // every restart the recorder writes exactly such a row for each entity as
+      // HA rebuilds its state machine. With no `unavailable` row in between (a
+      // clean shutdown records none for entities that don't publish
+      // availability) stripUnavailableArtifacts() can't see it, and it surfaces
+      // as a phantom event: "Door: closed" for a door that never opened.
+      //
+      // processLiveEvent() already drops the live equivalent unconditionally, so
+      // history has to match. This is not the same thing as collapse_duplicates
+      // — that one is a display preference about runs of real events, which is
+      // why it stays opt-in — so this is gated on the restart-artifact switch
+      // instead, and `ignore_unavailable: false` still restores the raw feed.
+      if (
+        shouldIgnoreUnavailable(cfg, globalConfig) &&
+        lastStates[item.id] === item.raw_state
+      ) {
+        continue;
+      }
+
+      lastStates[item.id] = item.raw_state;
       collapsed.push(item);
       continue;
     }
@@ -89,6 +116,11 @@ export function filterHistory(items, entities, limit, globalConfig = {}) {
 
   // Sort (OLDEST first) to keep the earliest event when collapsing
   filtered = filtered.sort((a, b) => a.time - b.time);
+
+  // Drop unavailable/unknown entries and the restart artifacts they leave
+  // behind. Must run on the oldest-first list and before collapseDuplicates,
+  // which cannot see through the gap an `unavailable` opens in a run.
+  filtered = stripUnavailableArtifacts(filtered, entities, globalConfig);
 
   // NEW: collapse duplicates
   filtered = collapseDuplicates(filtered, entities, globalConfig);

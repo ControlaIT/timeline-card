@@ -51,7 +51,9 @@
   "ui": {
     "show_more": "Zeige {n} weitere",
     "show_less": "Weniger anzeigen",
-    "no_events": "Keine Ereignisse in diesem Zeitraum."
+    "no_events": "Keine Ereignisse in diesem Zeitraum.",
+    "today": "Heute",
+    "yesterday": "Gestern"
   },
   "date_format": {
     "datetime": {
@@ -61,6 +63,14 @@
       "hour": "2-digit",
       "minute": "2-digit"
     },
-    "time_suffix": "Uhr"
+    "time_suffix": "Uhr",
+    "weekday": {
+      "weekday": "long"
+    },
+    "day_full": {
+      "day": "numeric",
+      "month": "long",
+      "year": "numeric"
+    }
   }
 }

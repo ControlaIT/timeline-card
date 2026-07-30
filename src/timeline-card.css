@@ -1,5 +1,10 @@
 :host {
   display: block;
+
+  /* Width of the column the line runs down. Defined here rather than on
+     `.wrapper` so `.day-header`, which is a sibling of the wrapper, can align
+     itself to the line too. */
+  --tc-line-column: 46px;
 }
 
 ha-card {
@@ -15,6 +20,67 @@ ha-card {
   /* color: white; */
 }
 
+/* group_by_day: one independent timeline segment per calendar day */
+.day-group + .day-group {
+  margin-top: 18px;
+}
+
+.day-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 4px 8px;
+}
+
+.day-header-date {
+  font-weight: 400;
+  opacity: 0.6;
+}
+
+/* Align the day header to the timeline line, which sits somewhere different in
+   each layout. */
+
+/* center: the line runs down the middle of a full-width wrapper, and the
+   header's own padding is symmetric, so centring its content lands on it. */
+.day-group.layout-center .day-header {
+  justify-content: center;
+}
+
+/* left/right: the wrapper is only as wide as its content and centres itself, so
+   the line is NOT at a fixed offset within the card — it moves with how wide the
+   event boxes are. The header has to share the wrapper's box to line up with it:
+   shrink the group down to the wrapper, then stretch the header back across it.
+   `width: 0` keeps the header's own text out of that max-content measurement — a
+   long date would otherwise widen the group, re-centring the wrapper inside it
+   and taking the line with it — while `min-width: 100%` still gives the header
+   the resulting width to align within. */
+.day-group.layout-left,
+.day-group.layout-right {
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.day-group.layout-left .day-header,
+.day-group.layout-right .day-header {
+  width: 0;
+  min-width: 100%;
+  flex-wrap: wrap; /* a date wider than the cards wraps instead of overflowing */
+}
+
+/* The line is centred on its column, so half the column is the offset to match. */
+.day-group.layout-left .day-header {
+  justify-content: flex-start;
+  padding-left: calc(var(--tc-line-column) / 2);
+}
+
+.day-group.layout-right .day-header {
+  justify-content: flex-end;
+  padding-right: calc(var(--tc-line-column) / 2);
+}
+
 .timeline-container {
   position: relative;
   width: 100%;
@@ -28,7 +94,6 @@ ha-card {
 .wrapper {
   position: relative;
   width: 100%;
-  --tc-line-column: 46px;
   --tc-line-offset: 50%;
 }
 
@@ -158,7 +223,11 @@ ha-card {
   align-items: center;
   box-shadow: 0 0 12px rgba(0, 0, 0, 0.25);
 
-  width: auto;
+  /* `event_width` sets --tc-event-width on the host to give every box the same
+     width instead of letting each size to its own text. max-width/flex-shrink
+     still apply, so a width wider than the available space is capped — equally
+     for every row, so they stay aligned. */
+  width: var(--tc-event-width, auto);
   max-width: 100%;
   flex-shrink: 1;
   min-width: 0;
@@ -169,6 +238,37 @@ ha-card {
 
 .event-box:hover {
   background: rgba(128, 128, 128, 0.2);
+}
+
+/* tap_action: none — nothing happens on click, so don't invite one. */
+.event-box.no-action {
+  cursor: default;
+}
+
+/* mirror_sides: make boxes on the left of the line a mirror image of the ones on
+   the right — icon on the inner edge, text ranged towards the line — instead of
+   every box being laid out left-to-right regardless of which side it sits on.
+   Most visible with `event_width`, where a fixed width otherwise leaves the
+   content of the left-hand boxes stranded away from the line.
+
+   `.row` keeps its natural direction: only its alignment flips, so the name
+   still reads before the state. */
+.wrapper.mirror .side.left .event-box {
+  flex-direction: row-reverse;
+}
+
+/* `align-items` ranges each block towards the line, but only shrinks blocks that
+   are narrower than the box. A block filling the full width has nothing left to
+   range — `force_multiline` gives `.state` `flex-basis: 100%`, and a long state
+   or timestamp fills the line on its own — so its text needs aligning too.
+   Inherited, so name/state/time all follow. */
+.wrapper.mirror .side.left .text {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.wrapper.mirror .side.left .row {
+  justify-content: flex-end;
 }
 
 .wrapper.compact .event-box {

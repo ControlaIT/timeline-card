@@ -17,16 +17,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/weedpump/timeline-card.git"
+    "url": "git+https://github.com/ControlaIT/timeline-card.git"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/weedpump/timeline-card/issues"
+    "url": "https://github.com/ControlaIT/timeline-card/issues"
   },
-  "homepage": "https://github.com/weedpump/timeline-card#readme",
+  "homepage": "https://github.com/ControlaIT/timeline-card#readme",
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "baseline-browser-mapping": "^2.9.19",

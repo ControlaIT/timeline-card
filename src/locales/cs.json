@@ -51,7 +51,9 @@
   "ui": {
     "show_more": "Zobrazit další {n}",
     "show_less": "Zobrazit méně",
-    "no_events": "V tomto časovém období nejsou žádné události."
+    "no_events": "V tomto časovém období nejsou žádné události.",
+    "today": "Dnes",
+    "yesterday": "Včera"
   },
   "date_format": {
     "datetime": {
@@ -61,6 +63,14 @@
       "hour": "2-digit",
       "minute": "2-digit",
       "hour12": false
+    },
+    "weekday": {
+      "weekday": "long"
+    },
+    "day_full": {
+      "day": "numeric",
+      "month": "long",
+      "year": "numeric"
     }
   }
 }

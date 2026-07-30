@@ -25,6 +25,16 @@ import { getCachedHistory, setCachedHistory } from './history-cache.js';
 // Unified state transformer for both history + live
 import { transformState } from './state-transform.js';
 import { resolveStateMappedColor } from './color-engine.js';
+import {
+  createUnavailableGapTracker,
+  shouldIgnoreUnavailable,
+} from './availability-filter.js';
+import {
+  groupItemsByDay,
+  formatDayLabel,
+  formatDayDate,
+} from './day-engine.js';
+import { toCssLength } from './config-engine.js';
 
 const translations = {
   cs,
@@ -64,6 +74,27 @@ class TimelineCard extends HTMLElement {
       throw new Error("Please define 'entities' as a list.");
     }
 
+    // 'hours'/'limit' are documented as required but were never actually
+    // validated — omitting either used to fail silently later (an uncaught
+    // rejection deep in the fetchHistory() promise chain, since `hours`
+    // being undefined makes `new Date(...)` produce an Invalid Date, and
+    // `.toISOString()` on that throws). Fail fast and visibly instead, same
+    // as the entities check above.
+    if (typeof config.hours !== 'number' || !(config.hours > 0)) {
+      throw new Error(
+        "timeline-card: 'hours' is required and must be a positive number."
+      );
+    }
+    if (
+      typeof config.limit !== 'number' ||
+      !Number.isInteger(config.limit) ||
+      config.limit <= 0
+    ) {
+      throw new Error(
+        "timeline-card: 'limit' is required and must be a positive integer."
+      );
+    }
+
     this.entities = config.entities.map((e) =>
       typeof e === 'string'
         ? { entity: e }
@@ -96,6 +127,7 @@ class TimelineCard extends HTMLElement {
 
     this.relativeTimeEnabled = config.relative_time ?? false;
     this.showDate = config.show_date ?? true;
+    this.groupByDay = config.group_by_day ?? false;
     this.showStates = config.show_states ?? true;
     this.showNames = config.show_names ?? true;
     this.showIcons = config.show_icons ?? true;
@@ -103,10 +135,18 @@ class TimelineCard extends HTMLElement {
     this.allowMultiline = config.allow_multiline ?? false;
     this.forceMultiline = config.force_multiline ?? false;
     this.compactLayout = config.compact_layout ?? false;
+    // Mirror the boxes sitting left of the line, so each side leans towards it.
+    // A no-op in `card_layout: left`, which has nothing on that side.
+    this.mirrorSides = config.mirror_sides ?? false;
     const layout = (config.card_layout || 'center').toLowerCase();
     this.cardLayout = ['center', 'left', 'right'].includes(layout)
       ? layout
       : 'center';
+
+    // Fixed width for every event box, so rows don't each size to their own
+    // entity name. Applied as a CSS var on the host; in single-sided layouts the
+    // grid column carries it instead — see applySingleSideWidth().
+    this.eventWidth = toCssLength(config.event_width);
 
     this.cardBackground = config.card_background ?? null;
     this.timelineLineStart = config.timeline_color_start ?? null;
@@ -133,7 +173,7 @@ class TimelineCard extends HTMLElement {
         : null;
     const overflow = (config.overflow || 'collapse').toLowerCase();
     this.overflowMode = overflow === 'scroll' ? 'scroll' : 'collapse';
-    this.maxHeight = config.max_height || null;
+    this.maxHeight = toCssLength(config.max_height);
     this.expanded = false;
 
     this.refreshInterval = config.refresh_interval || null;
@@ -147,6 +187,28 @@ class TimelineCard extends HTMLElement {
     this.items = [];
     this.loaded = false;
     this.config = config;
+
+    // Live events can start arriving (via startLiveEvents(), triggered by the
+    // very first `hass` setter call) before the initial history fetch has
+    // populated `this.items` — the two are not sequenced. Normally this race
+    // window is tiny, but right after an HA restart/reconnect it widens a lot
+    // (every client's websocket reconnects at once, HA is under load, and the
+    // REST history call can be delayed while live `state_changed` events keep
+    // flowing) — and that's exactly when HA re-announces every entity's state
+    // (`old_state: null`) as it rebuilds its state machine, even for entities
+    // whose value didn't actually change. `collapse_duplicates` compares a
+    // live event's `raw_state` against `this.items`, so with `this.items`
+    // still empty at that point there's nothing to compare against and the
+    // restart artifact slips through undeduped. Buffer live events until the
+    // first history load (cache or network) has populated `this.items`, then
+    // replay them through the normal path so the dedup check has real data.
+    this._historyReady = false;
+    this._pendingLiveEvents = [];
+
+    // Per-entity memory of the value held before an unavailable/unknown gap,
+    // so the live path can recognise an unchanged value coming back the same
+    // way stripUnavailableArtifacts() does for history.
+    this._liveGaps = createUnavailableGapTracker();
 
     this._applyThemeVars();
   }
@@ -176,6 +238,7 @@ class TimelineCard extends HTMLElement {
     this._setStyleVar('--tc-line-start', this.timelineLineStart);
     this._setStyleVar('--tc-line-end', this.timelineLineEnd);
     this._setStyleVar('--tc-dot-color', this.dotColor);
+    this._setStyleVar('--tc-event-width', this.eventWidth);
   }
 
   _setStyleVar(name, value) {
@@ -220,12 +283,14 @@ class TimelineCard extends HTMLElement {
     const cached = getCachedHistory(
       this.entities,
       this.hours,
-      this.languageCode
+      this.languageCode,
+      this.config
     );
 
     if (cached) {
       this.items = cached;
       this.render();
+      this._markHistoryReady();
       this.refreshInBackground();
       return;
     }
@@ -250,10 +315,33 @@ class TimelineCard extends HTMLElement {
       this.config // includes collapse_duplicates
     );
 
-    setCachedHistory(this.entities, this.hours, this.languageCode, items);
+    setCachedHistory(
+      this.entities,
+      this.hours,
+      this.languageCode,
+      items,
+      this.config
+    );
 
     this.items = items;
     this.render();
+    this._markHistoryReady();
+  }
+
+  // Marks the initial history load as complete and replays any live events
+  // that arrived while `this.items` was still empty/stale, through the same
+  // processLiveEvent() path used for events arriving after this point — so
+  // collapse_duplicates (and any other this.items-dependent logic) sees them
+  // in the same order they actually happened, compared against real data.
+  _markHistoryReady() {
+    if (this._historyReady) return;
+    this._historyReady = true;
+
+    const pending = this._pendingLiveEvents;
+    this._pendingLiveEvents = [];
+    for (const data of pending) {
+      this.processLiveEvent(data);
+    }
   }
 
   async refreshInBackground() {
@@ -275,7 +363,13 @@ class TimelineCard extends HTMLElement {
 
     if (JSON.stringify(items) === JSON.stringify(this.items)) return;
 
-    setCachedHistory(this.entities, this.hours, this.languageCode, items);
+    setCachedHistory(
+      this.entities,
+      this.hours,
+      this.languageCode,
+      items,
+      this.config
+    );
 
     this.items = items;
     this.render();
@@ -297,6 +391,11 @@ class TimelineCard extends HTMLElement {
       if (!data?.entity_id) return;
       if (!entityIds.includes(data.entity_id)) return;
 
+      if (!this._historyReady) {
+        this._pendingLiveEvents.push(data);
+        return;
+      }
+
       this.processLiveEvent(data);
     }, 'state_changed');
   }
@@ -306,6 +405,29 @@ class TimelineCard extends HTMLElement {
     const newState = data.new_state;
 
     const cfg = this.entities.find((e) => e.entity === entityId);
+
+    // --- HA logbook parity (components/logbook/queries/common.py) ---
+    // The logbook keeps a state row only when
+    //   OLD_STATE.state_id IS NOT NULL AND States.state != OLD_STATE.state
+    // Unlike the history REST API, a live `state_changed` event carries
+    // `old_state`, so both halves of that rule can be applied verbatim.
+    //
+    // No old_state means the entity was just added to the state machine
+    // rather than changed — which is precisely what every entity looks like
+    // while HA rebuilds its state machine after a restart or an integration
+    // reload. Same state on both sides means only attributes moved.
+    if (!data.old_state) return;
+    if (data.old_state.state === newState?.state) return;
+
+    // Going (or coming back) unavailable is the other half of the restart
+    // churn; the history path strips it in stripUnavailableArtifacts().
+    if (
+      shouldIgnoreUnavailable(cfg, this.config) &&
+      !this._liveGaps.keep(entityId, data.old_state.state, newState?.state)
+    ) {
+      return;
+    }
+    // ----------------------------------------------------------------
 
     // --- include/exclude filter for LIVE EVENTS ---
     const include = Array.isArray(cfg?.include_states)
@@ -443,101 +565,122 @@ class TimelineCard extends HTMLElement {
         : 'center';
     const compactClass =
       this.compactLayout && layout === 'center' ? 'compact' : '';
+    const mirrorClass = this.mirrorSides ? 'mirror' : '';
 
-    const rows = renderedItems
-      .map((item, index) => {
-        const side =
-          layout === 'center'
-            ? index % 2 === 0
-              ? 'left'
-              : 'right'
-            : layout === 'left'
-              ? 'right'
-              : 'left';
+    const renderRow = (item, index) => {
+      const side =
+        layout === 'center'
+          ? index % 2 === 0
+            ? 'left'
+            : 'right'
+          : layout === 'left'
+            ? 'right'
+            : 'left';
 
-        const entityCfg = item.entityCfg || {};
-        const entityPicture = item.entity_picture;
-        const showEntityPicture =
-          this.showIcons && entityCfg.show_entity_picture && entityPicture;
+      const entityCfg = item.entityCfg || {};
+      const entityPicture = item.entity_picture;
+      const showEntityPicture =
+        this.showIcons && entityCfg.show_entity_picture && entityPicture;
 
-        // COLOR RESOLUTION: entity state map → entity → card → theme/css
-        const nameColor = resolveStateMappedColor(
-          item.raw_state,
-          entityCfg.name_color_map,
-          entityCfg.name_color,
-          this.nameColor
-        );
-        const stateColor = entityCfg.state_color || this.stateColor || '';
+      // COLOR RESOLUTION: entity state map → entity → card → theme/css
+      const nameColor = resolveStateMappedColor(
+        item.raw_state,
+        entityCfg.name_color_map,
+        entityCfg.name_color,
+        this.nameColor
+      );
+      const stateColor = entityCfg.state_color || this.stateColor || '';
 
-        const renderEventBox = () => `
-          <div class="${eventBoxClassName}" data-entity-id="${item.id}">
-            ${
-              this.showIcons
-                ? showEntityPicture
-                  ? `<img class="entity-picture" src="${entityPicture}" alt="">`
-                  : `<ha-icon icon="${item.icon}" style="color:${item.icon_color};"></ha-icon>`
-                : ``
-            }
-            <div class="text">
-              <div class="row">
-                ${
-                  this.showNames
-                    ? `<div class="primary-text name" style="${
-                        nameColor ? `color:${nameColor};` : ''
-                      }">${item.name}</div>`
-                    : ``
-                }
-                ${
-                  this.showStates
-                    ? this.showNames
-                      ? `<div class="secondary-text state" style="${
-                          stateColor ? `color:${stateColor};` : ''
-                        }">(${item.state})</div>`
-                      : `<div class="primary-text state" style="${
-                          stateColor ? `color:${stateColor};` : ''
-                        }">${this.capitalize(item.state)}</div>`
-                    : ``
-                }
-              </div>
-              <div class="time">
-                ${
-                  this.relativeTimeEnabled
-                    ? relativeTime(item.time, this.i18n)
-                    : formatAbsoluteTime(
-                        item.time,
-                        this.languageCode,
-                        this.i18n,
-                        { includeDate: this.showDate }
-                      )
-                }
-              </div>
+      const renderEventBox = () => `
+        <div class="${eventBoxClassName}" data-entity-id="${item.id}">
+          ${
+            this.showIcons
+              ? showEntityPicture
+                ? `<img class="entity-picture" src="${entityPicture}" alt="">`
+                : `<ha-icon icon="${item.icon}" style="color:${item.icon_color};"></ha-icon>`
+              : ``
+          }
+          <div class="text">
+            <div class="row">
+              ${
+                this.showNames
+                  ? `<div class="primary-text name" style="${
+                      nameColor ? `color:${nameColor};` : ''
+                    }">${item.name}</div>`
+                  : ``
+              }
+              ${
+                this.showStates
+                  ? this.showNames
+                    ? `<div class="secondary-text state" style="${
+                        stateColor ? `color:${stateColor};` : ''
+                      }">${item.state}</div>`
+                    : `<div class="primary-text state" style="${
+                        stateColor ? `color:${stateColor};` : ''
+                      }">${this.capitalize(item.state)}</div>`
+                  : ``
+              }
+            </div>
+            <div class="time">
+              ${
+                this.relativeTimeEnabled
+                  ? relativeTime(item.time, this.i18n)
+                  : formatAbsoluteTime(
+                      item.time,
+                      this.languageCode,
+                      this.i18n,
+                      { includeDate: this.showDate }
+                    )
+              }
             </div>
           </div>
-        `;
+        </div>
+      `;
 
-        return `
-          <div class="timeline-row">
-            <div class="side left">
-              ${side === 'left' ? renderEventBox() : ''}
-            </div>
-
-            <div class="dot"></div>
-
-            <div class="side right">
-              ${side === 'right' ? renderEventBox() : ''}
-            </div>
+      return `
+        <div class="timeline-row">
+          <div class="side left">
+            ${side === 'left' ? renderEventBox() : ''}
           </div>
-        `;
-      })
-      .join('');
+
+          <div class="dot"></div>
+
+          <div class="side right">
+            ${side === 'right' ? renderEventBox() : ''}
+          </div>
+        </div>
+      `;
+    };
+
+    // Each "wrapper" owns its own timeline line — when grouping by day,
+    // every day gets an independent line/dot sequence instead of one
+    // continuous line spanning the whole history window.
+    const renderWrapper = (items) => `
+      <div class="wrapper ${compactClass} ${mirrorClass} layout-${layout}">
+        <div class="timeline-line"></div>
+        ${items.map((item, index) => renderRow(item, index)).join('')}
+      </div>
+    `;
+
+    const rows = this.groupByDay
+      ? groupItemsByDay(renderedItems)
+          .map(
+            (group) => `
+              <div class="day-group layout-${layout}">
+                <div class="day-header">
+                  <span class="day-header-relative">${formatDayLabel(group.date, this.i18n, this.languageCode)}</span>
+                  <span class="day-header-date">${formatDayDate(group.date, this.i18n, this.languageCode)}</span>
+                </div>
+                ${renderWrapper(group.items)}
+              </div>
+            `
+          )
+          .join('')
+      : renderWrapper(renderedItems);
 
     const containerStyles = [];
     if (this.maxHeight) {
-      const value =
-        typeof this.maxHeight === 'number'
-          ? `${this.maxHeight}px`
-          : `${this.maxHeight}`;
-      containerStyles.push(`max-height:${value};`);
+      containerStyles.push(`max-height:${this.maxHeight};`);
     }
     if (overflowMode === 'scroll' || containerStyles.length) {
       containerStyles.push('overflow-y:auto;');
@@ -564,10 +707,7 @@ class TimelineCard extends HTMLElement {
         <div class="timeline-container ${
           overflowMode === 'scroll' ? 'scrollable' : ''
         }" style="${containerStyle}">
-          <div class="wrapper ${compactClass} layout-${layout}">
-            <div class="timeline-line"></div>
-            ${rows}
-          </div>
+          ${rows}
         </div>
         ${collapseToggle}
     `;
@@ -608,24 +748,45 @@ class TimelineCard extends HTMLElement {
       return;
     }
 
-    const wrapper = root.querySelector('.wrapper');
-    if (!wrapper) return;
+    // With `group_by_day` there's one `.wrapper` per day instead of a single
+    // one for the whole card — measure across all of them and apply the same
+    // shared width to each, so single-sided columns stay aligned across day
+    // groups instead of each day sizing independently.
+    const wrappers = Array.from(root.querySelectorAll('.wrapper'));
+    if (!wrappers.length) return;
+
+    // An explicit `event_width` is the whole point of measuring — every box the
+    // same width — so honour it directly and skip the measuring pass. Here the
+    // grid column has to carry it, not the box: `.wrapper.layout-* .event-box`
+    // is `width: 100%` and outranks the `--tc-event-width` declaration.
+    if (this.eventWidth) {
+      this.singleSideWidth = null;
+      this.singleSideLayout = layout;
+      this.singleSideSignature = null;
+      wrappers.forEach((w) =>
+        w.style.setProperty('--tc-event-col-width', this.eventWidth)
+      );
+      return;
+    }
 
     const measure = () => {
       const signature = `${layout}-${this.allowMultiline}-${this.forceMultiline}`;
       if (this.singleSideSignature !== signature) {
-        wrapper.style.removeProperty('--tc-event-col-width');
+        wrappers.forEach((w) => w.style.removeProperty('--tc-event-col-width'));
         this.singleSideWidth = null;
         this.singleSideLayout = layout;
         this.singleSideSignature = signature;
       }
 
-      const boxes = Array.from(wrapper.querySelectorAll('.event-box'));
+      const boxes = wrappers.flatMap((w) =>
+        Array.from(w.querySelectorAll('.event-box'))
+      );
       if (!boxes.length) return;
 
-      const wrapperRect = wrapper.getBoundingClientRect();
-      const lineColRaw =
-        getComputedStyle(wrapper).getPropertyValue('--tc-line-column');
+      const wrapperRect = wrappers[0].getBoundingClientRect();
+      const lineColRaw = getComputedStyle(wrappers[0]).getPropertyValue(
+        '--tc-line-column'
+      );
       const lineCol = parseFloat(lineColRaw) || 0;
       const gap = 16; // column-gap defined in CSS
       const maxAvailable = Math.max(wrapperRect.width - lineCol - gap, 0);
@@ -652,10 +813,12 @@ class TimelineCard extends HTMLElement {
 
         this.singleSideWidth = target;
         this.singleSideLayout = layout;
-        wrapper.style.setProperty('--tc-event-col-width', `${target}px`);
+        wrappers.forEach((w) =>
+          w.style.setProperty('--tc-event-col-width', `${target}px`)
+        );
       } else {
         this.singleSideWidth = null;
-        wrapper.style.removeProperty('--tc-event-col-width');
+        wrappers.forEach((w) => w.style.removeProperty('--tc-event-col-width'));
       }
     };
 

@@ -51,7 +51,9 @@
   "ui": {
     "show_more": "Pokaż jeszcze {n}",
     "show_less": "Pokaż mniej",
-    "no_events": "Brak zdarzeń w tym okresie."
+    "no_events": "Brak zdarzeń w tym okresie.",
+    "today": "Dzisiaj",
+    "yesterday": "Wczoraj"
   },
   "date_format": {
     "datetime": {
@@ -61,6 +63,14 @@
       "hour": "2-digit",
       "minute": "2-digit",
       "hour12": false
+    },
+    "weekday": {
+      "weekday": "long"
+    },
+    "day_full": {
+      "day": "numeric",
+      "month": "long",
+      "year": "numeric"
     }
   }
 }

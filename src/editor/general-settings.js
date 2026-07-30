@@ -278,7 +278,27 @@ class TimelineCardGeneralSettings extends LitElement {
                 ></ha-selector>
               </div>
 
-              ${this._compactRow(cfg)}
+              <!-- EVENT WIDTH -->
+              <div class="tc-setting-row">
+                <div class="tc-setting-label">
+                  <div class="tc-setting-title">Event width</div>
+                  <div class="tc-setting-description">
+                    Fixed width in px for every event card. Leave empty to size
+                    each one to its own text.
+                  </div>
+                </div>
+                <input
+                  class="tc-text-input"
+                  type="number"
+                  min="1"
+                  style="width: 140px;"
+                  .value=${cfg.event_width ?? ''}
+                  @input=${(e) =>
+                    this._onNumberChange('event_width', e.target.value)}
+                />
+              </div>
+
+              ${this._mirrorRow(cfg)} ${this._compactRow(cfg)}
             </div>
           </div>
         </div>
@@ -319,6 +339,12 @@ class TimelineCardGeneralSettings extends LitElement {
                 'Include the date for absolute timestamps; turn off to display time only.',
                 'show_date',
                 cfg.show_date ?? true
+              )}
+              ${this._booleanRow(
+                'Group by day',
+                'Split the timeline into one independent segment per day, each with its own header and line.',
+                'group_by_day',
+                cfg.group_by_day ?? false
               )}
             </div>
           </div>
@@ -376,6 +402,12 @@ class TimelineCardGeneralSettings extends LitElement {
                     ]
                   )
                 : ''}
+              ${this._booleanRow(
+                'Ignore unavailable',
+                'Hide unavailable/unknown events and the restart artifacts they leave behind, like the official logbook does.',
+                'ignore_unavailable',
+                cfg.ignore_unavailable ?? true
+              )}
             </div>
           </div>
         </div>
@@ -609,6 +641,23 @@ class TimelineCardGeneralSettings extends LitElement {
       ev?.detail?.value ?? '',
       keepEmpty,
       fallbackValue
+    );
+  }
+
+  _mirrorRow(cfg) {
+    const layout = cfg.card_layout || 'center';
+    // Nothing sits left of the line in the `left` layout, so there is nothing
+    // to mirror there.
+    const disabled = layout === 'left';
+    const desc = disabled
+      ? 'Center or right layout required.'
+      : 'Mirror the cards left of the line: icon on the inner edge, text ranged towards the line.';
+    return this._booleanRow(
+      'Mirror sides',
+      desc,
+      'mirror_sides',
+      cfg.mirror_sides ?? false,
+      disabled
     );
   }
 

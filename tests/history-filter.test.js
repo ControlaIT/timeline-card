@@ -53,14 +53,21 @@ describe('filterHistory', () => {
   it('should respect per-entity configuration for collapsing', () => {
     const entities = [
       { entity: 'sensor.a', collapse_duplicates: true },
-      { entity: 'sensor.b', collapse_duplicates: false }, // B keeps duplicates
+      // B opts out of collapsing AND of restart-artifact filtering, which is
+      // what it takes to see a row that repeats the previous value: a repeat is
+      // not a state change, so the logbook-parity rule drops it on its own.
+      {
+        entity: 'sensor.b',
+        collapse_duplicates: false,
+        ignore_unavailable: false,
+      },
     ];
 
     const items = [
       { id: 'sensor.a', raw_state: 'ON', time: 1000 },
       { id: 'sensor.a', raw_state: 'ON', time: 900 }, // Dup A -> keep 900 (earliest), drop 1000
       { id: 'sensor.b', raw_state: 'RED', time: 800 },
-      { id: 'sensor.b', raw_state: 'RED', time: 700 }, // Dup B -> kept (config=false)
+      { id: 'sensor.b', raw_state: 'RED', time: 700 }, // Dup B -> kept (both opts off)
     ];
 
     const result = filterHistory(items, entities, 100, {});
@@ -72,6 +79,68 @@ describe('filterHistory', () => {
     expect(times).toContain(900);
     expect(times).toContain(800);
     expect(times).toContain(700);
+  });
+
+  it('drops a repeated value with no unavailable gap, without collapse_duplicates', () => {
+    // The restart shape stripUnavailableArtifacts() cannot see: HA shut down
+    // cleanly, recorded no `unavailable` for the entity, and re-announced
+    // `closed` on boot. Nothing opened — this must not reach the timeline.
+    const items = [
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 1000 },
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 2000 }, // restart
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    expect(result).toHaveLength(1);
+    expect(result[0].time).toBe(1000);
+  });
+
+  it('keeps genuine alternating changes around a repeated value', () => {
+    const items = [
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 1000 },
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 2000 }, // restart
+      { id: 'binary_sensor.door', raw_state: 'open', time: 3000 },
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 4000 },
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    expect(result.map((i) => [i.raw_state, i.time])).toEqual([
+      ['closed', 4000],
+      ['open', 3000],
+      ['closed', 1000],
+    ]);
+  });
+
+  it('restores the raw feed when ignore_unavailable is off card-wide', () => {
+    const items = [
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 1000 },
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 2000 },
+    ];
+
+    const result = filterHistory(items, [], 100, {
+      ignore_unavailable: false,
+    });
+
+    expect(result).toHaveLength(2);
+  });
+
+  it('does not let one entity restart-filter another', () => {
+    const items = [
+      { id: 'binary_sensor.a', raw_state: 'closed', time: 1000 },
+      { id: 'binary_sensor.b', raw_state: 'closed', time: 1100 },
+      { id: 'binary_sensor.a', raw_state: 'closed', time: 2000 }, // restart
+      { id: 'binary_sensor.b', raw_state: 'open', time: 2100 }, // genuine
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    expect(result.map((i) => `${i.id}:${i.raw_state}:${i.time}`)).toEqual([
+      'binary_sensor.b:open:2100',
+      'binary_sensor.b:closed:1100',
+      'binary_sensor.a:closed:1000',
+    ]);
   });
 
   it('should explicitly keep the oldest event in a sequence of duplicates', () => {

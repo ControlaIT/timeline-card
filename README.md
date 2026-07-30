@@ -703,3 +703,5 @@ Free to use, free to modify.
 
 Original work © 2025 Weedpump ([weedpump/timeline-card](https://github.com/weedpump/timeline-card)),
 fork modifications © 2026 Controlá. See [LICENSE](LICENSE).
+
+For the fork and upstream contribution workflow, see [CONTRIBUTING.md](CONTRIBUTING.md).

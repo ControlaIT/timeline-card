@@ -58,6 +58,8 @@
 4. [Per-Entity Configuration](#per-entity-configuration)
    1. [Example](#entity-example)
    2. [Entity Options](#entity-options)
+   3. [Per-entity visibility](#per-entity-visibility)
+   4. [State label placeholders](#state-label-placeholders)
 5. [Examples](#examples)
    1. [Presence Timeline](#presence-timeline)
    2. [Door Monitoring](#door-monitoring)
@@ -479,23 +481,104 @@ entities:
 
 ### Entity Options
 
-| Option                     | Type    | Description                                                                                                                               |
-| -------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                     | string  | Display name override                                                                                                                     |
-| `icon`                     | string  | Static icon                                                                                                                               |
-| `icon_map`                 | object  | State -> icon mapping                                                                                                                     |
-| `icon_color`               | string  | Static icon color                                                                                                                         |
-| `icon_color_map`           | object  | State -> color mapping                                                                                                                    |
-| `state_map`                | object  | State -> label override                                                                                                                   |
-| `include_states`           | list    | Only include events with these raw states                                                                                                 |
-| `exclude_states`           | list    | Hide events with these raw states (alternative to `include_states`)                                                                       |
-| `show_entity_picture`      | boolean | Show the entity picture instead of the icon when available                                                                                |
-| `name_color`               | string  | Name color override (fallback: card -> theme)                                                                                             |
-| `name_color_map`           | object  | Raw state -> name color mapping (fallback: entity name color -> card -> theme)                                                            |
-| `state_color`              | string  | State color override (fallback: card -> theme)                                                                                            |
-| `collapse_duplicates`      | boolean | Removes consecutive events with the same state for this entity only (overrides global setting).                                           |
-| `collapse_duplicates_keep` | string  | Which event to keep when collapsing: `earliest` or `latest` (overrides global setting).                                                   |
-| `ignore_unavailable`       | boolean | Hide `unavailable`/`unknown` events, restart artifacts and repeats of the previous value for this entity only (overrides global setting). |
+| Option                     | Type    | Description                                                                                                                                    |
+| -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                     | string  | Display name override                                                                                                                          |
+| `icon`                     | string  | Static icon                                                                                                                                    |
+| `icon_map`                 | object  | State -> icon mapping                                                                                                                          |
+| `icon_color`               | string  | Static icon color                                                                                                                              |
+| `icon_color_map`           | object  | State -> color mapping                                                                                                                         |
+| `state_map`                | object  | State -> label override. Labels can pull in live values with `{...}` placeholders — see [State label placeholders](#state-label-placeholders). |
+| `include_states`           | list    | Only include events with these raw states                                                                                                      |
+| `exclude_states`           | list    | Hide events with these raw states (alternative to `include_states`)                                                                            |
+| `show_entity_picture`      | boolean | Show the entity picture instead of the icon when available                                                                                     |
+| `show_names`               | boolean | Show the name for this entity only (overrides the card setting; omit to inherit)                                                               |
+| `show_states`              | boolean | Show the state for this entity only (overrides the card setting; omit to inherit)                                                              |
+| `show_icons`               | boolean | Show the icon for this entity only (overrides the card setting; omit to inherit)                                                               |
+| `name_color`               | string  | Name color override (fallback: card -> theme)                                                                                                  |
+| `name_color_map`           | object  | Raw state -> name color mapping (fallback: entity name color -> card -> theme)                                                                 |
+| `state_color`              | string  | State color override (fallback: card -> theme)                                                                                                 |
+| `collapse_duplicates`      | boolean | Removes consecutive events with the same state for this entity only (overrides global setting).                                                |
+| `collapse_duplicates_keep` | string  | Which event to keep when collapsing: `earliest` or `latest` (overrides global setting).                                                        |
+| `ignore_unavailable`       | boolean | Hide `unavailable`/`unknown` events, restart artifacts and repeats of the previous value for this entity only (overrides global setting).      |
+
+<a id="per-entity-visibility"></a>
+
+### Per-entity visibility
+
+`show_names`, `show_states` and `show_icons` are card-wide, but any entity can
+override them — for the common case of "show everything, except don't bother
+with the state of this one":
+
+```yaml
+type: custom:timeline-card
+hours: 12
+limit: 8
+show_states: true # card default
+entities:
+  - entity: binary_sensor.frontdoor_contact
+  - entity: person.tobi
+    show_states: false # this one shows only its name and icon
+```
+
+Omit the key on an entity to inherit the card's setting; that's not the same as
+setting it to `false`. In the UI editor each one is a three-way choice —
+**Inherit from card / Show / Hide** — rather than a switch, because these default
+to on and an unset switch would look like the opposite of what's on screen.
+
+Hiding the name promotes the state to the primary line, so an entity with
+`show_names: false` still reads correctly.
+
+<a id="state-label-placeholders"></a>
+
+### State label placeholders
+
+A `state_map` label can pull in live values with `{...}`, so an event can show
+more than a fixed word:
+
+```yaml
+entities:
+  - entity: climate.salon
+    state_map:
+      cool: 'Cool {temperature}°C' # this entity's own attribute
+      heat: 'Heat {sensor.salon_temp}°C' # another entity's state
+      dry: 'Dry {sensor.salon_clima.humidity}%' # another entity's attribute
+      'off': 'Apagado' # plain labels keep working
+```
+
+A token is read by its dots — an attribute name has none, an `entity_id` always
+has exactly one:
+
+| Token                 | Resolves to                                      |
+| --------------------- | ------------------------------------------------ |
+| `{state}`             | The event's own raw state.                       |
+| `{temperature}`       | An attribute of the entity the event belongs to. |
+| `{sensor.x}`          | Another entity's state.                          |
+| `{sensor.x.humidity}` | Another entity's attribute.                      |
+
+**Every value is the value at the moment of the event, not the current one.** A
+three-hour-old `cool` event shows the temperature that was set three hours ago.
+Referenced entities are fetched along with the rest of the history — in the same
+request, so this costs no extra round trip — and looked up at each event's own
+timestamp. They don't appear in the timeline themselves.
+
+Notes:
+
+- **This is not Jinja, deliberately.** Home Assistant's template engine only
+  knows the present: there is no way to ask it to render "as of 10:11", so a
+  Jinja template on a past event would quietly report today's value.
+- **No filters or arithmetic.** Numbers render exactly as Home Assistant reports
+  them, so you may see `24.0` where you wanted `24`.
+- **A templated label suppresses `unit_of_measurement`.** The label already
+  spells out its own formatting, so the unit isn't appended on top — otherwise
+  `'{state} grados'` on a °C sensor would read `23 grados °C`.
+- Anything that can't be resolved — missing attribute, unknown entity, an entity
+  with no history in the window — renders as empty rather than leaving `{braces}`
+  on screen.
+- A referenced entity that never changed during the window still resolves: the
+  history response includes the value it carried into the range.
+- Filters (`include_states`, `collapse_duplicates`, colors, icons) all still work
+  off the **raw** state, not the rendered label.
 
 ---
 

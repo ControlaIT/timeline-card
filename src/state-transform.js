@@ -10,8 +10,16 @@
 import { getEntityName } from './name-engine.js';
 import { getCustomConfig } from './config-engine.js';
 import { getIconForEntity, getIconColor } from './icon-engine.js';
+import { hasPlaceholders, interpolate } from './placeholder-engine.js';
 
-export function transformState(entityId, newState, hass, entities, i18n) {
+export function transformState(
+  entityId,
+  newState,
+  hass,
+  entities,
+  i18n,
+  resolveEntity
+) {
   if (!newState) return null;
 
   const cfg = getCustomConfig(entityId, entities);
@@ -26,9 +34,21 @@ export function transformState(entityId, newState, hass, entities, i18n) {
   const icon = getIconForEntity(hass.states[entityId], cfg, rawState);
   const icon_color = getIconColor(cfg, rawState);
 
-  const localizedState = i18n.getLocalizedState(entityId, rawState, cfg);
+  const label = i18n.getLocalizedState(entityId, rawState, cfg);
+
+  // A label with placeholders spells out its own formatting, units included, so
+  // appending unit_of_measurement on top of it would double up ("23 grados °C").
+  const templated = hasPlaceholders(label);
+  const localizedState = templated
+    ? interpolate(label, {
+        state: rawState,
+        attributes: newState.attributes,
+        resolveEntity,
+      })
+    : label;
+
   const stateWithUnit =
-    unit && typeof localizedState === 'string'
+    unit && !templated && typeof localizedState === 'string'
       ? `${localizedState} ${unit}`
       : localizedState;
 

@@ -18,6 +18,8 @@ import { relativeTime, formatAbsoluteTime } from './time-engine.js';
 
 import { fetchHistory } from './history-fetch.js';
 import { transformHistory } from './history-transform.js';
+import { buildHistoryIndex } from './history-index.js';
+import { collectReferencedEntities } from './placeholder-engine.js';
 import { filterHistory, passesValueFilter } from './history-filter.js';
 
 import { getCachedHistory, setCachedHistory } from './history-cache.js';
@@ -148,6 +150,11 @@ class TimelineCard extends HTMLElement {
     // entity name. Applied as a CSS var on the host; in single-sided layouts the
     // grid column carries it instead — see applySingleSideWidth().
     this.eventWidth = toCssLength(config.event_width);
+
+    // Entities referenced by `state_map` labels but not shown themselves. They
+    // ride along on the history request so their values can be resolved at each
+    // event's point in time.
+    this.referencedEntities = collectReferencedEntities(this.entities);
 
     // What clicking an event does. Defaults to `more-info`, which is what the
     // card did unconditionally before this was configurable.
@@ -304,13 +311,23 @@ class TimelineCard extends HTMLElement {
   }
 
   async refreshInForeground() {
-    const raw = await fetchHistory(this.hassInst, this.entities, this.hours);
+    const raw = await fetchHistory(
+      this.hassInst,
+      this.entities,
+      this.hours,
+      this.referencedEntities
+    );
+
+    // Built from the raw response so referenced entities can be read at each
+    // event's own timestamp rather than as they are now.
+    const index = buildHistoryIndex(raw.data);
 
     const flat = transformHistory(
       raw,
       this.entities,
       this.hassInst.states,
-      this.i18n
+      this.i18n,
+      index
     );
 
     const items = filterHistory(
@@ -350,13 +367,23 @@ class TimelineCard extends HTMLElement {
   }
 
   async refreshInBackground() {
-    const raw = await fetchHistory(this.hassInst, this.entities, this.hours);
+    const raw = await fetchHistory(
+      this.hassInst,
+      this.entities,
+      this.hours,
+      this.referencedEntities
+    );
+
+    // Built from the raw response so referenced entities can be read at each
+    // event's own timestamp rather than as they are now.
+    const index = buildHistoryIndex(raw.data);
 
     const flat = transformHistory(
       raw,
       this.entities,
       this.hassInst.states,
-      this.i18n
+      this.i18n,
+      index
     );
 
     const items = filterHistory(

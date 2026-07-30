@@ -240,6 +240,11 @@ ha-card {
   background: rgba(128, 128, 128, 0.2);
 }
 
+/* tap_action: none — nothing happens on click, so don't invite one. */
+.event-box.no-action {
+  cursor: default;
+}
+
 /* mirror_sides: make boxes on the left of the line a mirror image of the ones on
    the right — icon on the inner edge, text ranged towards the line — instead of
    every box being laid out left-to-right regardless of which side it sits on.

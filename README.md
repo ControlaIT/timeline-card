@@ -51,9 +51,10 @@
    3. [Overflow handling](#overflow-handling)
    4. [Event width](#event-width)
    5. [Mirrored sides](#mirrored-sides)
-   6. [Auto-Refresh](#auto-refresh)
-   7. [Live Events (WebSocket)](#live-events-websocket)
-   8. [Restart noise](#restart-noise)
+   6. [Tap action](#tap-action)
+   7. [Auto-Refresh](#auto-refresh)
+   8. [Live Events (WebSocket)](#live-events-websocket)
+   9. [Restart noise](#restart-noise)
 4. [Per-Entity Configuration](#per-entity-configuration)
    1. [Example](#entity-example)
    2. [Entity Options](#entity-options)
@@ -177,6 +178,7 @@ entities:
 | `max_height`               | string  | no       | -          | Constrain card height (e.g. `220px`, `16rem`); useful with `overflow: scroll`                                                                                                                                       |
 | `event_width`              | number  | no       | -          | Fixed width for every event card, so rows don't each size to their own entity name. A bare number is px; a string with a unit (`14rem`, `50%`) is used as authored. See [Event width](#event-width).                |
 | `mirror_sides`             | boolean | no       | false      | Mirror the cards sitting left of the line — icon on the inner edge, text ranged towards the line — instead of laying every card out left-to-right. See [Mirrored sides](#mirrored-sides).                           |
+| `tap_action`               | object  | no       | more-info  | What clicking an event does, using Home Assistant's standard action config. See [Tap action](#tap-action).                                                                                                          |
 | `title`                    | string  | no       | ""         | Card title                                                                                                                                                                                                          |
 | `relative_time`            | boolean | no       | false      | Use relative ("5 minutes ago") time                                                                                                                                                                                 |
 | `show_date`                | boolean | no       | true       | Include the date in absolute timestamps; set `false` to show time only                                                                                                                                              |
@@ -292,6 +294,62 @@ order. Works with `allow_multiline` and `force_multiline`.
 
 In `card_layout: right`, where every card sits left of the line, this mirrors all
 of them. In `card_layout: left` there is nothing on that side, so it does nothing.
+
+<a id="tap-action"></a>
+
+### Tap action
+
+Clicking an event opens its more-info dialog. `tap_action` takes Home Assistant's
+standard action config, so it's the same YAML any built-in card accepts:
+
+```yaml
+type: custom:timeline-card
+hours: 12
+limit: 8
+tap_action:
+  action: navigate
+  navigation_path: /lovelace/rooms
+entities:
+  - entity: binary_sensor.frontdoor_contact
+```
+
+| `action`         | Fields                                             | Notes                                                          |
+| ---------------- | -------------------------------------------------- | -------------------------------------------------------------- |
+| `more-info`      | `entity` (optional)                                | Default. Without `entity`, the clicked event's own entity.     |
+| `navigate`       | `navigation_path`, `navigation_replace` (optional) |                                                                |
+| `url`            | `url_path`                                         | Opens in a new tab.                                            |
+| `perform-action` | `perform_action`, `target`, `data`                 | `call-service` with `service`/`service_data` also still works. |
+| `toggle`         | `entity` (optional)                                | `homeassistant.toggle` on the clicked entity.                  |
+| `assist`         | `pipeline_id`, `start_listening` (optional)        | See the caveat below.                                          |
+| `fire-dom-event` | anything                                           | Fires `ll-custom` with the whole config, for browser_mod & co. |
+| `none`           | -                                                  | Nothing happens, and the cursor stops suggesting otherwise.    |
+
+Any of them can take a `confirmation`, with optional `text` and `exemptions`:
+
+```yaml
+tap_action:
+  action: perform-action
+  perform_action: light.turn_off
+  target:
+    entity_id: light.kitchen
+  confirmation:
+    text: Turn the kitchen light off?
+    exemptions:
+      - user: 5a1b2c3d4e5f...
+```
+
+Two limitations worth knowing, both from a custom card not being able to reach
+into the frontend's own bundle:
+
+- **`confirmation` uses the browser's native confirm dialog**, not Home
+  Assistant's styled one, and its default text isn't translated — set `text:` if
+  that matters.
+- **`assist` needs the voice dialog to have been loaded already** (i.e. opened
+  once by other means this session). Built-in cards pass the frontend an import
+  for it; a custom card has no way to.
+
+This is a card-level option: it applies to every event. There is no per-entity
+override.
 
 <a id="auto-refresh"></a>
 

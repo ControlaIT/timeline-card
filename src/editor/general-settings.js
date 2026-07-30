@@ -346,6 +346,23 @@ class TimelineCardGeneralSettings extends LitElement {
                 'group_by_day',
                 cfg.group_by_day ?? false
               )}
+
+              <!-- TAP ACTION -->
+              <div class="tc-setting-row">
+                <div class="tc-setting-label">
+                  <div class="tc-setting-title">Tap action</div>
+                  <div class="tc-setting-description">
+                    What clicking an event does. Defaults to showing more info.
+                  </div>
+                </div>
+                <ha-selector
+                  style="min-width: 200px; width: 240px;"
+                  .hass=${this.hass}
+                  .value=${cfg.tap_action}
+                  .selector=${{ ui_action: {} }}
+                  @value-changed=${(e) => this._onActionChange('tap_action', e)}
+                ></ha-selector>
+              </div>
             </div>
           </div>
         </div>
@@ -628,6 +645,12 @@ class TimelineCardGeneralSettings extends LitElement {
     }
 
     this._emitPatch(patch);
+  }
+
+  // The `ui_action` selector hands back a whole action config object (or
+  // undefined when cleared), so it goes into the patch as-is.
+  _onActionChange(key, ev) {
+    this._emitPatch({ [key]: ev?.detail?.value ?? undefined });
   }
 
   _onLanguageChange(ev) {

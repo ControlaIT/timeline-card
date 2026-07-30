@@ -35,6 +35,7 @@ import {
   formatDayDate,
 } from './day-engine.js';
 import { toCssLength } from './config-engine.js';
+import { handleTapAction, resolveActionConfig } from './action-engine.js';
 
 const translations = {
   cs,
@@ -147,6 +148,10 @@ class TimelineCard extends HTMLElement {
     // entity name. Applied as a CSS var on the host; in single-sided layouts the
     // grid column carries it instead — see applySingleSideWidth().
     this.eventWidth = toCssLength(config.event_width);
+
+    // What clicking an event does. Defaults to `more-info`, which is what the
+    // card did unconditionally before this was configurable.
+    this.tapAction = resolveActionConfig(config.tap_action);
 
     this.cardBackground = config.card_background ?? null;
     this.timelineLineStart = config.timeline_color_start ?? null;
@@ -551,6 +556,8 @@ class TimelineCard extends HTMLElement {
       'event-box',
       this.allowMultiline ? 'auto-multiline' : '',
       this.forceMultiline ? 'force-multiline' : '',
+      // Don't advertise a click that does nothing.
+      this.tapAction.action === 'none' ? 'no-action' : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -722,13 +729,12 @@ class TimelineCard extends HTMLElement {
 
     root.querySelectorAll('.event-box[data-entity-id]').forEach((el) => {
       el.addEventListener('click', () => {
-        this.dispatchEvent(
-          new CustomEvent('hass-more-info', {
-            detail: { entityId: el.dataset.entityId },
-            bubbles: true,
-            composed: true,
-          })
-        );
+        handleTapAction({
+          config: this.tapAction,
+          node: this,
+          hass: this.hassInst,
+          entityId: el.dataset.entityId,
+        });
       });
     });
 

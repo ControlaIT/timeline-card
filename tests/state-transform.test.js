@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { transformState } from '../src/state-transform.js';
+import { TranslationEngine } from '../src/translation-engine.js';
 
 // Mock dependencies
 const mockI18n = {
@@ -200,6 +201,87 @@ describe('transformState', () => {
       );
 
       expect(result.state).toBe('Templado °C');
+    });
+  });
+
+  describe('state_map default', () => {
+    // The real engine, so the catch-all is resolved the way the card does it.
+    const i18n = new TranslationEngine({ 'en-us': { status: {} } });
+
+    const reading = (state, attributes = {}) => ({
+      state,
+      last_changed: new Date().toISOString(),
+      attributes,
+    });
+
+    it('labels a state the map does not name, placeholders included', () => {
+      const entities = [
+        {
+          entity: 'sensor.temp',
+          state_map: { 0: 'Sin consumo', default: '{state} en curso' },
+        },
+      ];
+
+      const result = transformState(
+        'sensor.temp',
+        reading('42'),
+        mockHass,
+        entities,
+        i18n
+      );
+
+      expect(result.state).toBe('42 en curso');
+      expect(result.raw_state).toBe('42');
+    });
+
+    it('leaves an exactly mapped state alone', () => {
+      const entities = [
+        {
+          entity: 'sensor.temp',
+          state_map: { 0: 'Sin consumo', default: '{state} en curso' },
+        },
+      ];
+
+      const result = transformState(
+        'sensor.temp',
+        reading('0'),
+        mockHass,
+        entities,
+        i18n
+      );
+
+      expect(result.state).toBe('Sin consumo');
+    });
+
+    it('appends the unit to a plain catch-all label', () => {
+      const entities = [
+        { entity: 'sensor.temp', state_map: { default: 'Medido' } },
+      ];
+
+      const result = transformState(
+        'sensor.temp',
+        reading('42', { unit_of_measurement: '°C' }),
+        mockHass,
+        entities,
+        i18n
+      );
+
+      expect(result.state).toBe('Medido °C');
+    });
+
+    it('does not append a unit to an empty label', () => {
+      // Otherwise blanking a state's label leaves a stray " °C" on the row.
+      const entities = [{ entity: 'sensor.temp', state_map: { 42: '' } }];
+
+      const result = transformState(
+        'sensor.temp',
+        reading('42', { unit_of_measurement: '°C' }),
+        mockHass,
+        entities,
+        i18n
+      );
+
+      expect(result.state).toBe('');
     });
   });
 });

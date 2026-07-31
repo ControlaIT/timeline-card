@@ -47,8 +47,10 @@ export function transformState(
       })
     : label;
 
+  // An empty label is a deliberate "show nothing for this state", so it gets no
+  // unit either — otherwise the row would read as a bare " °C".
   const stateWithUnit =
-    unit && !templated && typeof localizedState === 'string'
+    unit && !templated && typeof localizedState === 'string' && localizedState
       ? `${localizedState} ${unit}`
       : localizedState;
 

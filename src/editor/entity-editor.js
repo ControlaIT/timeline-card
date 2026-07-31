@@ -306,7 +306,8 @@ class TimelineCardEntityEditor extends LitElement {
                 <div class="tc-setting-label">
                   <div class="tc-setting-title">State label map</div>
                   <div class="tc-setting-description">
-                    Override displayed labels per raw state.
+                    Override displayed labels per raw state. A row whose state
+                    is "default" labels every state the other rows don't name.
                   </div>
                 </div>
                 ${this._renderMapEditor('state_map', cfg.state_map, 'Label')}

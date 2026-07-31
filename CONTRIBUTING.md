@@ -61,6 +61,7 @@ Prefer separate pull requests for independent changes. Examples from this fork:
 - Timeline grouping by day.
 - Configurable tap actions.
 - Restart availability-artifact filtering.
+- A `default` catch-all label in `state_map`.
 
 Start with the smallest visual improvement that has a clear before/after
 example. A large combined pull request is harder for an upstream maintainer to

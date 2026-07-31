@@ -59,7 +59,8 @@
    1. [Example](#entity-example)
    2. [Entity Options](#entity-options)
    3. [Per-entity visibility](#per-entity-visibility)
-   4. [State label placeholders](#state-label-placeholders)
+   4. [A label for any state](#a-label-for-any-state)
+   5. [State label placeholders](#state-label-placeholders)
 5. [Examples](#examples)
    1. [Presence Timeline](#presence-timeline)
    2. [Door Monitoring](#door-monitoring)
@@ -481,26 +482,26 @@ entities:
 
 ### Entity Options
 
-| Option                     | Type    | Description                                                                                                                                    |
-| -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                     | string  | Display name override                                                                                                                          |
-| `icon`                     | string  | Static icon                                                                                                                                    |
-| `icon_map`                 | object  | State -> icon mapping                                                                                                                          |
-| `icon_color`               | string  | Static icon color                                                                                                                              |
-| `icon_color_map`           | object  | State -> color mapping                                                                                                                         |
-| `state_map`                | object  | State -> label override. Labels can pull in live values with `{...}` placeholders — see [State label placeholders](#state-label-placeholders). |
-| `include_states`           | list    | Only include events with these raw states                                                                                                      |
-| `exclude_states`           | list    | Hide events with these raw states (alternative to `include_states`)                                                                            |
-| `show_entity_picture`      | boolean | Show the entity picture instead of the icon when available                                                                                     |
-| `show_names`               | boolean | Show the name for this entity only (overrides the card setting; omit to inherit)                                                               |
-| `show_states`              | boolean | Show the state for this entity only (overrides the card setting; omit to inherit)                                                              |
-| `show_icons`               | boolean | Show the icon for this entity only (overrides the card setting; omit to inherit)                                                               |
-| `name_color`               | string  | Name color override (fallback: card -> theme)                                                                                                  |
-| `name_color_map`           | object  | Raw state -> name color mapping (fallback: entity name color -> card -> theme)                                                                 |
-| `state_color`              | string  | State color override (fallback: card -> theme)                                                                                                 |
-| `collapse_duplicates`      | boolean | Removes consecutive events with the same state for this entity only (overrides global setting).                                                |
-| `collapse_duplicates_keep` | string  | Which event to keep when collapsing: `earliest` or `latest` (overrides global setting).                                                        |
-| `ignore_unavailable`       | boolean | Hide `unavailable`/`unknown` events, restart artifacts and repeats of the previous value for this entity only (overrides global setting).      |
+| Option                     | Type    | Description                                                                                                                                                                                |
+| -------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                     | string  | Display name override                                                                                                                                                                      |
+| `icon`                     | string  | Static icon                                                                                                                                                                                |
+| `icon_map`                 | object  | State -> icon mapping                                                                                                                                                                      |
+| `icon_color`               | string  | Static icon color                                                                                                                                                                          |
+| `icon_color_map`           | object  | State -> color mapping                                                                                                                                                                     |
+| `state_map`                | object  | State -> label override; the key [`default`](#a-label-for-any-state) covers every state not listed. Labels can pull in live values with `{...}` [placeholders](#state-label-placeholders). |
+| `include_states`           | list    | Only include events with these raw states                                                                                                                                                  |
+| `exclude_states`           | list    | Hide events with these raw states (alternative to `include_states`)                                                                                                                        |
+| `show_entity_picture`      | boolean | Show the entity picture instead of the icon when available                                                                                                                                 |
+| `show_names`               | boolean | Show the name for this entity only (overrides the card setting; omit to inherit)                                                                                                           |
+| `show_states`              | boolean | Show the state for this entity only (overrides the card setting; omit to inherit)                                                                                                          |
+| `show_icons`               | boolean | Show the icon for this entity only (overrides the card setting; omit to inherit)                                                                                                           |
+| `name_color`               | string  | Name color override (fallback: card -> theme)                                                                                                                                              |
+| `name_color_map`           | object  | Raw state -> name color mapping (fallback: entity name color -> card -> theme)                                                                                                             |
+| `state_color`              | string  | State color override (fallback: card -> theme)                                                                                                                                             |
+| `collapse_duplicates`      | boolean | Removes consecutive events with the same state for this entity only (overrides global setting).                                                                                            |
+| `collapse_duplicates_keep` | string  | Which event to keep when collapsing: `earliest` or `latest` (overrides global setting).                                                                                                    |
+| `ignore_unavailable`       | boolean | Hide `unavailable`/`unknown` events, restart artifacts and repeats of the previous value for this entity only (overrides global setting).                                                  |
 
 <a id="per-entity-visibility"></a>
 
@@ -528,6 +529,50 @@ to on and an unset switch would look like the opposite of what's on screen.
 
 Hiding the name promotes the state to the primary line, so an entity with
 `show_names: false` still reads correctly.
+
+<a id="a-label-for-any-state"></a>
+
+### A label for any state
+
+Listing every state one by one only works when you know them all. For entities
+whose state is open-ended — a number, a PMS status code, a text sensor — the
+`default` key in `state_map` labels **everything the map doesn't name**:
+
+```yaml
+entities:
+  - entity: sensor.room_101_housekeeping
+    state_map:
+      clean: 'Clean'
+      inspected: 'Inspected'
+      default: 'Status: {state}' # dirty, out_of_order, anything new
+```
+
+It's the same `default` key `icon_map` already uses, and it follows the same
+order: an exact match for the state wins, then `default`, then the card's
+[locale](#locales) table, then the raw state as-is. So the map above still shows
+`Clean` for `clean`, and `Status: pickup` for a state that didn't exist when the
+dashboard was written.
+
+Two things it pairs with:
+
+- **`{state}`** (and any other [placeholder](#state-label-placeholders)) — a
+  single catch-all can carry the value through instead of hiding it, which is
+  usually what you want for numeric sensors: `default: '{state} kWh used'`.
+- **A fixed string** — `default: 'State changed'` collapses every value into one
+  label, for a timeline that should read as "something happened here" and nothing
+  more.
+
+Notes:
+
+- `default` labels states, it doesn't filter them. To keep events out of the
+  timeline entirely, use `include_states` / `exclude_states`; they work off the
+  raw state, so a catch-all label never interferes.
+- An entity whose state really is the word `default` can't be mapped exactly —
+  the key is read as the catch-all. Use `include_states` or a placeholder label
+  if you hit this.
+- Mapping a state to an empty string (`out_of_order: ''`) shows a blank label,
+  and drops the `unit_of_measurement` suffix along with it. To hide the state
+  line for the whole entity, use `show_states: false` instead.
 
 <a id="state-label-placeholders"></a>
 

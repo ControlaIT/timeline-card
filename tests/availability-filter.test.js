@@ -231,4 +231,26 @@ describe('filterHistory + restart artifacts', () => {
     expect(result).toHaveLength(1);
     expect(result[0].time).toBe(1000);
   });
+
+  it('keeps a logbook entry sitting inside a restart artifact sequence', () => {
+    const items = [
+      { id: 'binary_sensor.door', raw_state: 'off', time: 1000 },
+      { id: 'binary_sensor.door', raw_state: 'unavailable', time: 2000 },
+      {
+        id: 'binary_sensor.door',
+        raw_state: null,
+        state: 'HA volvió',
+        time: 2050,
+        kind: 'logbook',
+      },
+      { id: 'binary_sensor.door', raw_state: 'off', time: 2100 },
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    // The `unavailable` row and the unchanged `off` coming back are stripped as
+    // restart noise; the message recorded in between is not state churn and
+    // stays.
+    expect(result.map((i) => i.time)).toEqual([2050, 1000]);
+  });
 });

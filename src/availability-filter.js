@@ -46,6 +46,11 @@ export function stripUnavailableArtifacts(items, entities, globalConfig = {}) {
   const gapSinceLastShown = {};
 
   return items.filter((item) => {
+    // A logbook entry carries a message, not a state. It can't be
+    // `unavailable`, and it can't be the unchanged value coming back after a
+    // restart — it's a one-off record of something that happened.
+    if (item.kind === 'logbook') return true;
+
     const cfg = entities.find((e) => e.entity === item.id);
 
     if (!shouldIgnoreUnavailable(cfg, globalConfig)) return true;

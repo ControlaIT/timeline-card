@@ -128,6 +128,34 @@ export function getIconColor(cfg, state) {
   if (cfg?.icon_color) return cfg.icon_color;
 }
 
+// ------------------------------------
+// LOGBOOK ENTRIES (no state)
+// ------------------------------------
+// A `logbook.log` entry carries a message, not a state, so every state-keyed
+// lookup below (`icon_map`, `icon_color_map`, DEVICE_CLASS_MAP, GENERIC_STATES)
+// has nothing to key on — `icon_map[undefined]` would silently miss and
+// DOMAIN_MAP's functions would all fall through to their else branch. These two
+// resolve what's left: the entity's static icon, plus a `logbook_*` override so
+// custom events can be told apart from state changes at a glance.
+//
+// DOMAIN_MAP is deliberately not consulted. Its entries are functions of the
+// state, so calling one with nothing lands on its else branch and produces an
+// icon that reads as a value the entry never had — `binary_sensor` would come
+// back `mdi:eye-off`, i.e. "off", for what is only a message. The final
+// fallback says what the row actually is instead.
+
+export function getLogbookIconColor(cfg) {
+  return cfg?.logbook_icon_color ?? cfg?.icon_color;
+}
+
+export function getLogbookIcon(stateObj, cfg) {
+  if (cfg?.logbook_icon) return cfg.logbook_icon;
+  if (cfg?.icon) return cfg.icon;
+  if (cfg?.icon_map?.default) return cfg.icon_map.default;
+  if (stateObj?.attributes?.icon) return stateObj.attributes.icon;
+  return 'mdi:message-text';
+}
+
 export function getIconForEntity(stateObj, cfg, forcedState) {
   if (!stateObj) return 'mdi:help-circle';
 

@@ -425,6 +425,12 @@ class TimelineCardGeneralSettings extends LitElement {
                 'ignore_unavailable',
                 cfg.ignore_unavailable ?? true
               )}
+              ${this._booleanRow(
+                'Show logbook entries',
+                'Also show custom events written by the logbook.log service. Automation and script triggers are not included.',
+                'show_logbook_entries',
+                cfg.show_logbook_entries ?? false
+              )}
             </div>
           </div>
         </div>

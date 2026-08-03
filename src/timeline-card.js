@@ -17,6 +17,13 @@ import { TranslationEngine } from './translation-engine.js';
 import { relativeTime, formatAbsoluteTime } from './time-engine.js';
 
 import { fetchHistory } from './history-fetch.js';
+import { fetchLogbook } from './logbook-fetch.js';
+import {
+  transformLogbook,
+  transformLogbookEntry,
+  isCustomLogbookEntry,
+  shouldShowLogbook,
+} from './logbook-transform.js';
 import { transformHistory } from './history-transform.js';
 import { buildHistoryIndex } from './history-index.js';
 import { collectReferencedEntities } from './placeholder-engine.js';
@@ -194,7 +201,17 @@ class TimelineCard extends HTMLElement {
     this.singleSideLayout = null;
     this.singleSideSignature = null;
 
+    // `logbook.log` entries are a second data source, not a second view of the
+    // states one, so they're opt-in: a card that doesn't ask for them makes no
+    // extra WS call and renders exactly what it always did. Per-entity
+    // `show_logbook_entries` overrides ride along inside `this.entities`.
+    this.showLogbookEntries = config.show_logbook_entries ?? false;
+    this.logbookEnabled =
+      this.showLogbookEntries ||
+      this.entities.some((e) => e.show_logbook_entries);
+
     this.liveUnsub = null;
+    this.logbookUnsub = null;
 
     this.items = [];
     this.loaded = false;
@@ -216,6 +233,7 @@ class TimelineCard extends HTMLElement {
     // replay them through the normal path so the dedup check has real data.
     this._historyReady = false;
     this._pendingLiveEvents = [];
+    this._pendingLogbookEvents = [];
 
     // Per-entity memory of the value held before an unavailable/unknown gap,
     // so the live path can recognise an unchanged value coming back the same
@@ -310,13 +328,24 @@ class TimelineCard extends HTMLElement {
     await this.refreshInForeground();
   }
 
-  async refreshInForeground() {
-    const raw = await fetchHistory(
-      this.hassInst,
-      this.entities,
-      this.hours,
-      this.referencedEntities
-    );
+  // Fetches both sources and merges them into the final item list. Shared by
+  // the foreground and background refresh, which differ only in what they do
+  // with the result.
+  async _buildItems() {
+    // Independent endpoints (REST history, WS logbook) — no reason to wait for
+    // one before starting the other. fetchLogbook() resolves to [] on failure,
+    // so the history render never depends on the logbook succeeding.
+    const [raw, logbookEntries] = await Promise.all([
+      fetchHistory(
+        this.hassInst,
+        this.entities,
+        this.hours,
+        this.referencedEntities
+      ),
+      this.logbookEnabled
+        ? fetchLogbook(this.hassInst, this.entities, this.hours)
+        : Promise.resolve([]),
+    ]);
 
     // Built from the raw response so referenced entities can be read at each
     // event's own timestamp rather than as they are now.
@@ -330,12 +359,28 @@ class TimelineCard extends HTMLElement {
       index
     );
 
-    const items = filterHistory(
-      flat,
+    // Merged before filterHistory(), which sorts by time and applies `limit` to
+    // everything at once — so logbook entries interleave with state changes by
+    // when they happened instead of being appended as a separate block.
+    const merged = flat.concat(
+      transformLogbook(
+        logbookEntries,
+        this.entities,
+        this.hassInst,
+        this.config
+      )
+    );
+
+    return filterHistory(
+      merged,
       this.entities,
       this.limit,
       this.config // includes collapse_duplicates
     );
+  }
+
+  async refreshInForeground() {
+    const items = await this._buildItems();
 
     setCachedHistory(
       this.entities,
@@ -364,34 +409,16 @@ class TimelineCard extends HTMLElement {
     for (const data of pending) {
       this.processLiveEvent(data);
     }
+
+    const pendingLogbook = this._pendingLogbookEvents;
+    this._pendingLogbookEvents = [];
+    for (const msg of pendingLogbook) {
+      this.processLogbookEvent(msg);
+    }
   }
 
   async refreshInBackground() {
-    const raw = await fetchHistory(
-      this.hassInst,
-      this.entities,
-      this.hours,
-      this.referencedEntities
-    );
-
-    // Built from the raw response so referenced entities can be read at each
-    // event's own timestamp rather than as they are now.
-    const index = buildHistoryIndex(raw.data);
-
-    const flat = transformHistory(
-      raw,
-      this.entities,
-      this.hassInst.states,
-      this.i18n,
-      index
-    );
-
-    const items = filterHistory(
-      flat,
-      this.entities,
-      this.limit,
-      this.config // includes collapse_duplicates
-    );
+    const items = await this._buildItems();
 
     if (JSON.stringify(items) === JSON.stringify(this.items)) return;
 
@@ -430,6 +457,57 @@ class TimelineCard extends HTMLElement {
 
       this.processLiveEvent(data);
     }, 'state_changed');
+
+    if (!this.logbookEnabled) return;
+
+    // `logbook.log` fires `logbook_entry` on the bus, never `state_changed`, so
+    // it needs a subscription of its own — without it these rows would only
+    // appear on the next poll, and not at all on a card with no
+    // `refresh_interval`.
+    this.logbookUnsub = this.hassInst.connection.subscribeEvents((msg) => {
+      const data = msg?.data;
+      if (!data?.entity_id) return;
+      if (!entityIds.includes(data.entity_id)) return;
+
+      if (!this._historyReady) {
+        this._pendingLogbookEvents.push(msg);
+        return;
+      }
+
+      this.processLogbookEvent(msg);
+    }, 'logbook_entry');
+  }
+
+  processLogbookEvent(msg) {
+    const data = msg?.data;
+    if (!isCustomLogbookEntry(data)) return;
+
+    const cfg = this.entities.find((e) => e.entity === data.entity_id);
+    if (!shouldShowLogbook(cfg, this.config)) return;
+
+    // The bus payload is `{name, message, domain, entity_id}` — it has no
+    // `when`, so the time comes off the event envelope. `time_fired` is an ISO
+    // string here, unlike the epoch float `logbook/get_events` returns.
+    const firedAt = Date.parse(msg.time_fired);
+    const timeMs = Number.isNaN(firedAt) ? Date.now() : firedAt;
+
+    const item = transformLogbookEntry(
+      data,
+      this.hassInst,
+      this.entities,
+      timeMs
+    );
+
+    // No `old_state` parity check and no collapse_duplicates pass, unlike
+    // processLiveEvent(): neither applies to something that isn't a state
+    // change. Two identical messages are two things that happened twice.
+    this.items.unshift(item);
+
+    if (this.limit && this.items.length > this.limit) {
+      this.items = this.items.slice(0, this.limit);
+    }
+
+    this.render();
   }
 
   processLiveEvent(data) {
@@ -521,10 +599,25 @@ class TimelineCard extends HTMLElement {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
-    if (typeof this.liveUnsub === 'function') {
-      this.liveUnsub();
-    }
+    this._unsubscribe(this.liveUnsub);
     this.liveUnsub = null;
+    this._unsubscribe(this.logbookUnsub);
+    this.logbookUnsub = null;
+  }
+
+  // `connection.subscribeEvents()` resolves to the unsubscribe function rather
+  // than returning it, so a bare `typeof handle === 'function'` check never
+  // matches and the subscription outlives the card — one leaked listener per
+  // card every time a dashboard is navigated away from. Both shapes are handled
+  // so this keeps working if the client ever returns the function directly.
+  _unsubscribe(handle) {
+    if (typeof handle === 'function') {
+      handle();
+    } else if (typeof handle?.then === 'function') {
+      handle
+        .then((unsub) => typeof unsub === 'function' && unsub())
+        .catch(() => {});
+    }
   }
 
   // ------------------------------------

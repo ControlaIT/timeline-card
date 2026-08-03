@@ -162,6 +162,47 @@ class TimelineCardEntityEditor extends LitElement {
                 </div>
               </div>
 
+              <!-- LOGBOOK ENTRIES -->
+              <div class="tc-setting-block">
+                <div class="tc-setting-label">
+                  <div class="tc-setting-title">Logbook entries</div>
+                  <div class="tc-setting-description">
+                    Custom events written by the logbook.log service. They carry
+                    a message instead of a state, so icon_map and the state
+                    filters do not apply to them.
+                  </div>
+                </div>
+                ${this._booleanRow(
+                  'Show logbook entries (entity level)',
+                  "Override the card's setting for this entity only.",
+                  'show_logbook_entries',
+                  cfg.show_logbook_entries ?? null
+                )}
+                <div class="tc-setting-row">
+                  <div class="tc-setting-label">
+                    <div class="tc-setting-title">Logbook icon</div>
+                    <div class="tc-setting-description">
+                      Icon for logbook entries only. Defaults to the custom icon
+                      above.
+                    </div>
+                  </div>
+
+                  <ha-icon-picker
+                    style="min-width: 200px; width: 280px; max-width: 280px;"
+                    .value=${cfg.logbook_icon || ''}
+                    @value-changed=${(e) =>
+                      this._updateField('logbook_icon', e.detail.value)}
+                  ></ha-icon-picker>
+                </div>
+                <div class="tc-color-row">
+                  ${this._renderColorPicker(
+                    'logbook_icon_color',
+                    cfg.logbook_icon_color,
+                    'Logbook icon color'
+                  )}
+                </div>
+              </div>
+
               <!-- COLLAPSE DUPLICATES -->
               ${this._booleanRow(
                 'Collapse duplicates (entity level)',

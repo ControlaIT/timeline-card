@@ -14,6 +14,9 @@ function buildKey(entities, hours, lang, options = {}) {
     collapse_duplicates: options.collapse_duplicates,
     collapse_duplicates_keep: options.collapse_duplicates_keep,
     ignore_unavailable: options.ignore_unavailable,
+    // Decides whether the cached items include logbook entries at all, so
+    // toggling it has to miss the cache rather than serve a stale shape.
+    show_logbook_entries: options.show_logbook_entries,
   };
 
   return `${JSON.stringify(entityConfig)}__${JSON.stringify(historyOptions)}__${hours}__${lang}`;

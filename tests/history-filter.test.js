@@ -223,3 +223,91 @@ describe('filterHistory', () => {
     expect(times).not.toContain(400);
   });
 });
+
+// A logbook.log entry reports a message, not a state. Every filter below
+// selects on state, so each has to let it through untouched — otherwise the
+// entries are fetched and normalised only to be dropped before rendering.
+describe('filterHistory with logbook entries', () => {
+  const logbookItem = (time, state = 'Mensaje') => ({
+    id: 'binary_sensor.door',
+    raw_state: null,
+    state,
+    time,
+    kind: 'logbook',
+  });
+
+  it('survives include_states, which would otherwise reject a null state', () => {
+    const entities = [{ entity: 'binary_sensor.door', include_states: ['on'] }];
+    const items = [
+      { id: 'binary_sensor.door', raw_state: 'on', time: 100 },
+      { id: 'binary_sensor.door', raw_state: 'off', time: 200 },
+      logbookItem(300),
+    ];
+
+    const result = filterHistory(items, entities, 100, {});
+
+    expect(result.map((i) => i.time)).toEqual([300, 100]);
+  });
+
+  it('survives exclude_states', () => {
+    const entities = [
+      { entity: 'binary_sensor.door', exclude_states: ['off'] },
+    ];
+    const items = [
+      { id: 'binary_sensor.door', raw_state: 'off', time: 100 },
+      logbookItem(200),
+    ];
+
+    const result = filterHistory(items, entities, 100, {});
+
+    expect(result).toHaveLength(1);
+    expect(result[0].kind).toBe('logbook');
+  });
+
+  it('survives min_value/max_value, which parseFloat(null) would fail', () => {
+    const entities = [
+      { entity: 'binary_sensor.door', min_value: 10, max_value: 20 },
+    ];
+    const items = [
+      { id: 'binary_sensor.door', raw_state: '5', time: 100 },
+      { id: 'binary_sensor.door', raw_state: '15', time: 200 },
+      logbookItem(300),
+    ];
+
+    const result = filterHistory(items, entities, 100, {});
+
+    expect(result.map((i) => i.time)).toEqual([300, 200]);
+  });
+
+  it('does not collapse consecutive entries sharing a null raw_state', () => {
+    const entities = [
+      { entity: 'binary_sensor.door', collapse_duplicates: true },
+    ];
+    const items = [
+      logbookItem(100, 'Primero'),
+      logbookItem(200, 'Segundo'),
+      logbookItem(300, 'Primero'),
+    ];
+
+    const result = filterHistory(items, entities, 100, {});
+
+    // Three separate things happened, even though two share the same text.
+    expect(result.map((i) => i.state)).toEqual([
+      'Primero',
+      'Segundo',
+      'Primero',
+    ]);
+  });
+
+  it('interleaves with state changes by time and shares the limit', () => {
+    const items = [
+      { id: 'binary_sensor.door', raw_state: 'on', time: 100 },
+      logbookItem(150),
+      { id: 'binary_sensor.door', raw_state: 'off', time: 200 },
+    ];
+
+    const result = filterHistory(items, [], 2, {});
+
+    expect(result.map((i) => i.time)).toEqual([200, 150]);
+  });
+});

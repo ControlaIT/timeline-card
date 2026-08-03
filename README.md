@@ -55,6 +55,7 @@
    7. [Auto-Refresh](#auto-refresh)
    8. [Live Events (WebSocket)](#live-events-websocket)
    9. [Restart noise](#restart-noise)
+   10. [Logbook entries](#logbook-entries)
 4. [Per-Entity Configuration](#per-entity-configuration)
    1. [Example](#entity-example)
    2. [Entity Options](#entity-options)
@@ -85,6 +86,7 @@
 - Locale-based state translation with per-entity overrides
 - Optional auto-refresh interval (in seconds)
 - Live updates via WebSocket - timeline updates instantly without page refresh
+- Optional `logbook.log` entries, interleaved with state history and updated live
 - Works with any entity that appears in Home Assistant history
 
 ---
@@ -204,6 +206,7 @@ entities:
 | `collapse_duplicates`      | boolean | no       | false      | Removes consecutive events with the same state across all entities.                                                                                                                                                 |
 | `collapse_duplicates_keep` | string  | no       | `earliest` | Which event to keep when collapsing duplicates: `earliest` (start of the run) or `latest` (end of the run).                                                                                                         |
 | `ignore_unavailable`       | boolean | no       | true       | Hides `unavailable`/`unknown` events, the restart artifacts they leave behind, and rows that only repeat an entity's previous value. See [Restart noise](#restart-noise).                                           |
+| `show_logbook_entries`     | boolean | no       | false      | Also show custom events written by the `logbook.log` service. Automation and script triggers are not included. See [Logbook entries](#logbook-entries).                                                             |
 
 ```yaml
 type: custom:timeline-card
@@ -444,6 +447,102 @@ wins, so a run still resolves to your chosen end of it.
 
 ---
 
+<a id="logbook-entries"></a>
+
+### Logbook entries
+
+Everything above concerns _states_. Home Assistant can also record free-text
+events through the `logbook.log` service:
+
+```yaml
+action: logbook.log
+data:
+  name: Cleaning finished
+  message: Room marked ready by housekeeping
+  entity_id: binary_sensor.room_101_occupancy
+```
+
+These are not state changes — they are written to the logbook, not to the state
+machine — so the `history` API the card normally reads never returns them. Set
+`show_logbook_entries: true` to fetch them as well:
+
+```yaml
+type: custom:timeline-card
+hours: 24
+limit: 20
+show_logbook_entries: true
+entities:
+  - entity: binary_sensor.room_101_occupancy
+```
+
+The setting can also be enabled for only selected entities, or disabled for one
+entity when it is enabled for the card:
+
+```yaml
+type: custom:timeline-card
+show_logbook_entries: true
+entities:
+  - entity: binary_sensor.room_101_occupancy
+    logbook_icon: mdi:broom
+    logbook_icon_color: teal
+  - entity: binary_sensor.room_102_occupancy
+    show_logbook_entries: false
+```
+
+The entry's `message` becomes the row's secondary text, so a logbook event reads
+the same way a state change does and takes its place in the timeline by when it
+happened.
+
+For the primary text the entity's configured `name` wins, and the entry's own
+`name` is used only when the entity is configured without one:
+
+```
+name:  (entity config)  →  the entry's name  →  friendly_name  →  entity_id
+```
+
+`logbook.log` **requires** a `name` argument, so every entry carries one whether
+or not it was written with this card in mind — an automation logging
+`name: climate` would otherwise label that row differently from every state row
+of the same entity, breaking the column readers use to tell entities apart. Omit
+`name` on the entity if you'd rather each entry spoke for itself.
+
+**Only `logbook.log` entries are shown.** The logbook also holds a row every
+time an automation or script fires ("triggered by state of …"), which would
+swamp the timeline. Home Assistant marks those with a `source` field that a
+`logbook.log` never has, and the card filters on it — so adding an
+`automation.*` entity to the card gives you its state changes, not its trigger
+history.
+
+Requires the `recorder` integration, which is enabled by default.
+
+#### What does not apply to them
+
+A logbook entry carries a message where a state would be, so anything that
+selects or renders based on state has nothing to work with and is skipped for
+these rows:
+
+| Option                                    | Behaviour                                               |
+| ----------------------------------------- | ------------------------------------------------------- |
+| `include_states`, `exclude_states`        | Skipped — the entry has no state to match               |
+| `min_value`, `max_value`                  | Skipped                                                 |
+| `collapse_duplicates`                     | Skipped — two messages are two events, never duplicates |
+| `ignore_unavailable`                      | Skipped — an entry cannot be a restart artifact         |
+| `state_map`, `icon_map`, `icon_color_map` | Skipped — all keyed by state                            |
+
+For the icon, the card falls back to `logbook_icon` → `icon` →
+`icon_map.default` → the entity's own icon → `mdi:message-text`. Note that
+`icon_map` is only consulted for its `default` key: resolving `icon_map` against
+the entity's _current_ state would label a past message with a value it never
+had.
+
+Use `logbook_icon` / `logbook_icon_color` per entity when you want these rows to
+stand out from the state changes around them.
+
+New events appear immediately, without waiting for `refresh_interval` — the card
+subscribes to the `logbook_entry` bus event alongside `state_changed`.
+
+---
+
 <a id="per-entity-configuration"></a>
 
 ## 🧩 Per-Entity Configuration
@@ -502,6 +601,9 @@ entities:
 | `collapse_duplicates`      | boolean | Removes consecutive events with the same state for this entity only (overrides global setting).                                                                                            |
 | `collapse_duplicates_keep` | string  | Which event to keep when collapsing: `earliest` or `latest` (overrides global setting).                                                                                                    |
 | `ignore_unavailable`       | boolean | Hide `unavailable`/`unknown` events, restart artifacts and repeats of the previous value for this entity only (overrides global setting).                                                  |
+| `show_logbook_entries`     | boolean | Show `logbook.log` events for this entity only (overrides global setting). See [Logbook entries](#logbook-entries).                                                                        |
+| `logbook_icon`             | string  | Icon for this entity's logbook entries. Defaults to `icon`.                                                                                                                                |
+| `logbook_icon_color`       | string  | Icon color for this entity's logbook entries. Defaults to `icon_color`.                                                                                                                    |
 
 <a id="per-entity-visibility"></a>
 

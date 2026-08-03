@@ -12,6 +12,15 @@ function collapseDuplicates(list, entities, globalConfig) {
   const latestCandidates = {};
 
   for (const item of list) {
+    // Logbook entries all share `raw_state: null`, so any run of them would
+    // read as one repeated value and collapse into a single row — losing every
+    // message but the first. They aren't duplicates: two `logbook.log` calls
+    // are two distinct events even when the text matches.
+    if (item.kind === 'logbook') {
+      collapsed.push(item);
+      continue;
+    }
+
     const cfg = entities.find((e) => e.entity === item.id) || {};
 
     // Entity → YAML → fallback to global
@@ -94,7 +103,15 @@ export function passesValueFilter(raw_state, cfg) {
 }
 
 export function filterHistory(items, entities, limit, globalConfig = {}) {
+  // `include_states` / `exclude_states` / `min_value` / `max_value` all select
+  // on the state a row reports. A logbook entry reports none, so there is
+  // nothing for them to match — and left to run, `include_states` would reject
+  // every one of them (`include.includes(null)` is false) while `min_value`
+  // would too (`parseFloat(null)` is NaN). Filtering by state is a statement
+  // about state rows; these pass through it.
   let filtered = items.filter((ev) => {
+    if (ev.kind === 'logbook') return true;
+
     const cfg = entities.find((e) => e.entity === ev.id);
     const include = Array.isArray(cfg?.include_states)
       ? cfg.include_states
@@ -110,6 +127,7 @@ export function filterHistory(items, entities, limit, globalConfig = {}) {
 
   // Value-based filter (min_value / max_value)
   filtered = filtered.filter((ev) => {
+    if (ev.kind === 'logbook') return true;
     const cfg = entities.find((e) => e.entity === ev.id);
     return passesValueFilter(ev.raw_state, cfg);
   });

@@ -49,7 +49,7 @@
     "triggered": "triggered"
   },
   "ui": {
-    "show_more": "Show {n} more",
+    "show_more": "Show more",
     "show_less": "Show less",
     "no_events": "No events in this time period.",
     "today": "Today",

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `overflow: collapse` (`visible_events`) now reveals events in pages instead of all at once: each "Show more" click adds another `visible_events` (fewer on the last click, if that's all that's left) instead of dumping every remaining fetched item into the DOM in one go. The button label is a plain "Show more"/"Show less" — it no longer states the batch size, so it reads the same on every click including a shorter last one. Fetching still happens once, up front, for the whole `hours` window — HA's `history/period` has no cursor, so splitting that fetch into growing time slices per click was evaluated and dropped: for a low-churn entity (needing most of the window to reach a page), each wider re-request re-downloads the earlier slice too, ending up costing more total data and round-trips than one request for the full window. Only what's revealed in the DOM is paged
 - Fixed WebSocket event subscriptions not being released when a card is removed
   from a dashboard. `subscribeEvents()` returns its unsubscribe callback through
   a promise; the card now handles that API shape for both state and logbook

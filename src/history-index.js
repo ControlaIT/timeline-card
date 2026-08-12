@@ -5,10 +5,11 @@
 // already downloaded, so a `state_map` label can reference another entity and
 // still show what was true when the event happened rather than what is true now.
 //
-// Built from the RAW history response, before transformHistory() drops the
-// synthetic row at the start of the window: that row is exactly the value an
-// entity carried into the range, so for an entity that didn't change during the
-// whole window it's the only value there is.
+// Built from the RAW history response, ahead of the synthetic row at the start
+// of the window that transformHistory() marks `contextOnly` (never rendered):
+// that row is exactly the value an entity carried into the range, so for an
+// entity that didn't change during the whole window it's the only value there
+// is.
 
 function toMillis(value) {
   return value instanceof Date ? value.getTime() : new Date(value).getTime();

@@ -112,6 +112,11 @@ export function filterHistory(items, entities, limit, globalConfig = {}) {
   let filtered = items.filter((ev) => {
     if (ev.kind === 'logbook') return true;
 
+    // A contextOnly row (the synthetic window-start backfill, see
+    // history-transform.js) is never rendered, so a display filter has nothing
+    // to say about it — it only exists to seed stripUnavailableArtifacts().
+    if (ev.contextOnly) return true;
+
     const cfg = entities.find((e) => e.entity === ev.id);
     const include = Array.isArray(cfg?.include_states)
       ? cfg.include_states
@@ -128,6 +133,7 @@ export function filterHistory(items, entities, limit, globalConfig = {}) {
   // Value-based filter (min_value / max_value)
   filtered = filtered.filter((ev) => {
     if (ev.kind === 'logbook') return true;
+    if (ev.contextOnly) return true;
     const cfg = entities.find((e) => e.entity === ev.id);
     return passesValueFilter(ev.raw_state, cfg);
   });

@@ -8,6 +8,14 @@ import { transformState } from './state-transform.js';
  * history-index.js). Each entry resolves its `state_map` placeholders against
  * the values other entities held at that entry's own timestamp, so a past event
  * reports what was true when it happened.
+ *
+ * `history/period` backfills a synthetic first row per entity, timestamped
+ * exactly at the query's `start`, carrying whatever value the entity held going
+ * into the window. It is marked `contextOnly` rather than dropped: it's never a
+ * real event to render, but it's exactly "the value this entity had before the
+ * window" that stripUnavailableArtifacts() (availability-filter.js) needs to
+ * judge a value returning right at the window's edge — see
+ * docs/issues/rolling-window-restart-artifact-boundary.md.
  */
 export function transformHistory(
   historyData,
@@ -44,11 +52,13 @@ export function transformHistory(
       );
 
       if (item) {
+        if (item.time.getTime() === start.getTime()) {
+          item.contextOnly = true;
+        }
         flat.push(item);
       }
     });
   });
 
-  // Remove synthetic "range start"
-  return flat.filter((e) => e.time.getTime() !== start.getTime());
+  return flat;
 }

@@ -40,6 +40,13 @@ export function shouldIgnoreUnavailable(cfg, globalConfig = {}) {
  * only when it repeats the last shown value *and* the entity passed through an
  * unavailable/unknown gap in between. A plain repeated value with no gap is
  * left alone — that stays the job of `collapse_duplicates`.
+ *
+ * A `contextOnly` item (the synthetic window-start row from history-transform.js)
+ * still updates `lastShownState`/`gapSinceLastShown` so a gap sitting right at
+ * the window's edge is judged with the same context a wider window would have
+ * given it, but it's never emitted — it isn't a real event, just the value the
+ * entity carried into the window. See
+ * docs/issues/rolling-window-restart-artifact-boundary.md.
  */
 export function stripUnavailableArtifacts(items, entities, globalConfig = {}) {
   const lastShownState = {};
@@ -53,7 +60,7 @@ export function stripUnavailableArtifacts(items, entities, globalConfig = {}) {
 
     const cfg = entities.find((e) => e.entity === item.id);
 
-    if (!shouldIgnoreUnavailable(cfg, globalConfig)) return true;
+    if (!shouldIgnoreUnavailable(cfg, globalConfig)) return !item.contextOnly;
 
     if (isUnavailableState(item.raw_state)) {
       // The entity went away. Remember it, so we can recognise an unchanged
@@ -70,7 +77,7 @@ export function stripUnavailableArtifacts(items, entities, globalConfig = {}) {
     if (cameBackUnchanged) return false;
 
     lastShownState[item.id] = item.raw_state;
-    return true;
+    return !item.contextOnly;
   });
 }
 

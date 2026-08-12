@@ -193,7 +193,12 @@ class TimelineCard extends HTMLElement {
     const overflow = (config.overflow || 'collapse').toLowerCase();
     this.overflowMode = overflow === 'scroll' ? 'scroll' : 'collapse';
     this.maxHeight = toCssLength(config.max_height);
-    this.expanded = false;
+    // How many items are currently revealed. `null` means "just the first
+    // page" (`visibleEventCount`) — each "Show more" click bumps this by
+    // another `visibleEventCount` rather than revealing everything at once,
+    // so a card with hundreds of items fetched for `hours` doesn't dump them
+    // all into the DOM on a single click (ITD-432).
+    this.revealedCount = null;
 
     this.refreshInterval = config.refresh_interval || null;
     this.refreshTimer = null;
@@ -662,18 +667,26 @@ class TimelineCard extends HTMLElement {
       overflowMode === 'collapse' &&
       Number.isInteger(this.visibleEventCount) &&
       this.visibleEventCount > 0;
-    const visibleLimit = hasVisibleLimit ? this.visibleEventCount : null;
+    // The page size for both the first screenful and every "Show more" click.
+    const step = hasVisibleLimit ? this.visibleEventCount : null;
 
-    const shouldCollapse =
-      overflowMode === 'collapse' &&
-      visibleLimit !== null &&
-      !this.expanded &&
-      this.items.length > visibleLimit;
+    // How many items are shown right now, clamped to what's actually loaded
+    // (a background refresh can shrink `this.items` under a previously
+    // revealed count).
+    const revealedLimit = hasVisibleLimit
+      ? Math.min(this.revealedCount ?? step, this.items.length)
+      : null;
 
-    const hiddenCount =
-      overflowMode === 'collapse' && visibleLimit
-        ? Math.max(this.items.length - visibleLimit, 0)
-        : 0;
+    const shouldCollapse = hasVisibleLimit && this.items.length > revealedLimit;
+
+    const hiddenCount = hasVisibleLimit
+      ? Math.max(this.items.length - revealedLimit, 0)
+      : 0;
+
+    // Size of the *next* batch a click on "Show more" would reveal — capped
+    // by however many are actually left, so the last click of a run can add
+    // fewer than a full page instead of promising `step` and delivering less.
+    const nextBatch = hasVisibleLimit ? Math.min(step, hiddenCount) : 0;
 
     const eventBoxClassName = [
       'event-box',
@@ -686,7 +699,7 @@ class TimelineCard extends HTMLElement {
       .join(' ');
 
     const renderedItems = shouldCollapse
-      ? this.items.slice(0, visibleLimit)
+      ? this.items.slice(0, revealedLimit)
       : this.items;
 
     const layout =
@@ -828,20 +841,29 @@ class TimelineCard extends HTMLElement {
     }
     const containerStyle = containerStyles.join('');
 
-    const collapseToggle =
-      overflowMode === 'collapse' && hiddenCount > 0
-        ? `
+    // Once every fetched item is revealed there's nothing left to page
+    // through, but the toggle stays — as "Show less" — to fold back down to
+    // the first page, same as before.
+    const isFullyRevealed =
+      hasVisibleLimit && revealedLimit >= this.items.length;
+    const showToggle =
+      hasVisibleLimit &&
+      (hiddenCount > 0 || isFullyRevealed) &&
+      this.items.length > step;
+
+    const collapseToggle = showToggle
+      ? `
           <div class="toggle-row">
-            <button class="toggle-button" type="button" id="tc-toggle-hidden" aria-expanded="${this.expanded}">
+            <button class="toggle-button" type="button" id="tc-toggle-hidden" aria-expanded="${isFullyRevealed}">
               ${
-                this.expanded
-                  ? this.i18n.t('ui.show_less')
-                  : this.i18n.t('ui.show_more', { n: hiddenCount })
+                hiddenCount > 0
+                  ? this.i18n.t('ui.show_more')
+                  : this.i18n.t('ui.show_less')
               }
             </button>
           </div>
         `
-        : '';
+      : '';
 
     card.innerHTML = `
         ${this.title ? `<h1 class="card-title">${this.title}</h1>` : ''}
@@ -856,7 +878,7 @@ class TimelineCard extends HTMLElement {
     const toggleBtn = root.getElementById('tc-toggle-hidden');
     if (toggleBtn) {
       toggleBtn.addEventListener('click', () => {
-        this.expanded = !this.expanded;
+        this.revealedCount = hiddenCount > 0 ? revealedLimit + nextBatch : null;
         this.render();
       });
     }

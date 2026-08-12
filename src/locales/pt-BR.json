@@ -49,7 +49,7 @@
     "triggered": "disparado"
   },
   "ui": {
-    "show_more": "Mostrar mais {n}",
+    "show_more": "Mostrar mais",
     "show_less": "Mostrar menos",
     "no_events": "Nenhum evento neste período.",
     "today": "Hoje",

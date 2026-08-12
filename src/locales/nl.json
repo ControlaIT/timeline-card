@@ -49,7 +49,7 @@
     "triggered": "getriggerd"
   },
   "ui": {
-    "show_more": "Toon {n} meer",
+    "show_more": "Toon meer",
     "show_less": "Toon minder",
     "no_events": "Geen gebeurtenissen gedurende deze periode.",
     "today": "Vandaag",

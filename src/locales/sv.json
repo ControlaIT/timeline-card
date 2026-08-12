@@ -49,7 +49,7 @@
     "triggered": "utlöst"
   },
   "ui": {
-    "show_more": "Visa {n} mer",
+    "show_more": "Visa mer",
     "show_less": "Visa mindre",
     "no_events": "Inga händelser under denna period.",
     "today": "Idag",

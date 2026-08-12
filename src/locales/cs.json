@@ -49,7 +49,7 @@
     "triggered": "spuštěno"
   },
   "ui": {
-    "show_more": "Zobrazit další {n}",
+    "show_more": "Zobrazit další",
     "show_less": "Zobrazit méně",
     "no_events": "V tomto časovém období nejsou žádné události.",
     "today": "Dnes",

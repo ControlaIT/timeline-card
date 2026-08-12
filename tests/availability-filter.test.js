@@ -140,6 +140,45 @@ describe('stripUnavailableArtifacts', () => {
 
     expect(stripUnavailableArtifacts(restartBurst, entities)).toHaveLength(3);
   });
+
+  it('a contextOnly row seeds lastShownState but is never emitted itself', () => {
+    // Regression for the rolling-window boundary bug: the window opens with
+    // the entity already in a gap, so the only clue that 15:39 is a flicker
+    // (not a real change) is the value the entity carried into the window —
+    // exactly what history-transform.js marks contextOnly.
+    const items = [
+      { id: 'climate.x', raw_state: 'cool', time: 500, contextOnly: true },
+      { id: 'climate.x', raw_state: 'unavailable', time: 1000 },
+      { id: 'climate.x', raw_state: 'cool', time: 2000 },
+    ];
+
+    expect(stripUnavailableArtifacts(items, [])).toHaveLength(0);
+  });
+
+  it('a contextOnly row does not suppress a real change across the gap', () => {
+    const items = [
+      { id: 'climate.x', raw_state: 'cool', time: 500, contextOnly: true },
+      { id: 'climate.x', raw_state: 'unavailable', time: 1000 },
+      { id: 'climate.x', raw_state: 'heat', time: 2000 },
+    ];
+
+    const result = stripUnavailableArtifacts(items, []);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ raw_state: 'heat', time: 2000 });
+  });
+
+  it('never emits the contextOnly row even with ignore_unavailable off', () => {
+    const items = [
+      { id: 'climate.x', raw_state: 'cool', time: 500, contextOnly: true },
+      { id: 'climate.x', raw_state: 'heat', time: 2000 },
+    ];
+
+    const result = stripUnavailableArtifacts(items, [], {
+      ignore_unavailable: false,
+    });
+
+    expect(result.map((r) => r.time)).toEqual([2000]);
+  });
 });
 
 describe('createUnavailableGapTracker', () => {
@@ -230,6 +269,37 @@ describe('filterHistory + restart artifacts', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].time).toBe(1000);
+  });
+
+  it('regression: a flicker landing right on the window edge is still hidden', () => {
+    // docs/issues/rolling-window-restart-artifact-boundary.md — the window's
+    // start falls between the pre-gap value and the `unavailable`, so the
+    // pre-gap `cool` itself is out of range. Only the contextOnly row (what
+    // history-transform.js backfills from history/period's synthetic start
+    // row) lets the filter recognise the 2000 `cool` as the same flicker it
+    // would catch with a wider window.
+    const items = [
+      {
+        id: 'climate.ona_alanda_108_global_climate',
+        raw_state: 'cool',
+        time: 500,
+        contextOnly: true,
+      },
+      {
+        id: 'climate.ona_alanda_108_global_climate',
+        raw_state: 'unavailable',
+        time: 1000,
+      },
+      {
+        id: 'climate.ona_alanda_108_global_climate',
+        raw_state: 'cool',
+        time: 2000,
+      },
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    expect(result).toHaveLength(0);
   });
 
   it('keeps a logbook entry sitting inside a restart artifact sequence', () => {

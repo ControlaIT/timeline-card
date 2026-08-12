@@ -220,7 +220,7 @@ entities:
 
 ### Overflow handling
 
-Use `visible_events` when you want to fetch more history than you can show in the available space. With the default `overflow: collapse`, extra entries are hidden behind a **Show more/less** toggle. If you prefer a scroll container, set `overflow: scroll` and add a `max_height`.
+Use `visible_events` when you want to fetch more history than you can show in the available space. With the default `overflow: collapse`, only the first `visible_events` entries show; each click on **Show more** reveals another `visible_events` (the last click can reveal fewer, if that's all that's left), and **Show less** folds back down to the first page. If you prefer a scroll container, set `overflow: scroll` and add a `max_height`.
 
 ```yaml
 type: custom:timeline-card

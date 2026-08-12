@@ -49,7 +49,7 @@
     "triggered": "uruchomiony"
   },
   "ui": {
-    "show_more": "Pokaż jeszcze {n}",
+    "show_more": "Pokaż więcej",
     "show_less": "Pokaż mniej",
     "no_events": "Brak zdarzeń w tym okresie.",
     "today": "Dzisiaj",

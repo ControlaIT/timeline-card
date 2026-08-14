@@ -9,6 +9,7 @@
 import { getEntityName } from './name-engine.js';
 import { getCustomConfig } from './config-engine.js';
 import { getLogbookIcon, getLogbookIconColor } from './icon-engine.js';
+import { interpolate } from './placeholder-engine.js';
 
 /**
  * True for entries written by the `logbook.log` service.
@@ -59,10 +60,20 @@ export function logbookEntryTime(entry) {
  * to tell rows apart. Falling back to `entry.name` before `friendly_name` keeps
  * the entry's label for entities configured without one.
  */
-export function transformLogbookEntry(entry, hass, entities, timeMs) {
+export function transformLogbookEntry(
+  entry,
+  hass,
+  entities,
+  timeMs,
+  resolveEntity
+) {
   const entityId = entry.entity_id;
   const cfg = getCustomConfig(entityId, entities);
   const stateObj = hass?.states?.[entityId];
+  const extra =
+    typeof cfg.extra_text === 'string' && cfg.extra_text
+      ? interpolate(cfg.extra_text, { resolveEntity }).trim()
+      : '';
 
   return {
     id: entityId,
@@ -75,6 +86,7 @@ export function transformLogbookEntry(entry, hass, entities, timeMs) {
       stateObj?.attributes?.entity_picture_local ||
       null,
     state: entry.message,
+    extra,
     // No state to map, filter or colour by. Every consumer that keys off
     // `raw_state` checks `kind` first and lets these through untouched.
     raw_state: null,
@@ -99,7 +111,13 @@ export function shouldShowLogbook(cfg, globalConfig = {}) {
  * onto the history items before filterHistory() sorts and limits them all
  * together.
  */
-export function transformLogbook(entries, entities, hass, globalConfig = {}) {
+export function transformLogbook(
+  entries,
+  entities,
+  hass,
+  globalConfig = {},
+  resolveEntityAt
+) {
   if (!Array.isArray(entries)) return [];
 
   const items = [];
@@ -113,7 +131,10 @@ export function transformLogbook(entries, entities, hass, globalConfig = {}) {
     const timeMs = logbookEntryTime(entry);
     if (!timeMs) continue;
 
-    items.push(transformLogbookEntry(entry, hass, entities, timeMs));
+    const resolveEntity = resolveEntityAt
+      ? (entityId) => resolveEntityAt(entityId, timeMs)
+      : undefined;
+    items.push(transformLogbookEntry(entry, hass, entities, timeMs, resolveEntity));
   }
 
   return items;

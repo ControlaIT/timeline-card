@@ -106,20 +106,27 @@ export function interpolate(text, { state, attributes, resolveEntity } = {}) {
 }
 
 /**
- * Every external entity referenced by any entity's `state_map`.
+ * Every external entity referenced by any entity's `state_map` or `extra_text`.
  *
  * The card fetches history for exactly the entities it was configured with, so
- * without this a referenced sensor would have no history to resolve against.
- * Collected up front in setConfig() and added to the same history request.
+ * without this a referenced sensor would have no history to resolve against and
+ * every past event would render the token as empty. Collected up front in
+ * setConfig() and added to the same history request.
+ *
+ * Reads `extra_text` off the entity config, which setConfig() has already
+ * resolved against the card-wide default — so a default set once at card level
+ * pulls in its referenced entities too.
  */
 export function collectReferencedEntities(entities = []) {
   const found = new Set();
 
   for (const cfg of entities) {
-    for (const label of Object.values(cfg?.state_map || {})) {
-      if (typeof label !== 'string') continue;
+    const templates = [...Object.values(cfg?.state_map || {}), cfg?.extra_text];
 
-      for (const [, token] of label.matchAll(PLACEHOLDER)) {
+    for (const template of templates) {
+      if (typeof template !== 'string') continue;
+
+      for (const [, token] of template.matchAll(PLACEHOLDER)) {
         const ref = parseToken(token);
         if (ref.kind === 'entity-state' || ref.kind === 'entity-attribute') {
           found.add(ref.entityId);

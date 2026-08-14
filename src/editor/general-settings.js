@@ -347,6 +347,29 @@ class TimelineCardGeneralSettings extends LitElement {
                 cfg.group_by_day ?? false
               )}
 
+              <!-- EXTRA LINE -->
+              <div class="tc-setting-block">
+                <div class="tc-setting-label">
+                  <div class="tc-setting-title">Extra line</div>
+                  <div class="tc-setting-description">
+                    An extra line for every event, using placeholders resolved
+                    at each event's own point in time: <code>{state}</code>,
+                    <code>{temperature}</code> (own attribute),
+                    <code>{sensor.x}</code> (another entity's state),
+                    <code>{sensor.x.humidity}</code> (its attribute). Any entity
+                    may override it.
+                  </div>
+                </div>
+                <input
+                  class="tc-text-input"
+                  style="width: 100%;"
+                  placeholder="{temperature}°C · {sensor.salon_humedad}%"
+                  .value=${cfg.extra_text || ''}
+                  @input=${(e) =>
+                    this._onTextChange('extra_text', e.target.value)}
+                />
+              </div>
+
               <!-- TAP ACTION -->
               <div class="tc-setting-row">
                 <div class="tc-setting-label">
@@ -384,7 +407,7 @@ class TimelineCardGeneralSettings extends LitElement {
               )}
               ${this._booleanRow(
                 'Force multiline',
-                'Always place the state on a new line under the name.',
+                'Always give each field its own line: name, state, extra line and time.',
                 'force_multiline',
                 cfg.force_multiline ?? false
               )}

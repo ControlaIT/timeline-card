@@ -204,6 +204,70 @@ describe('transformState', () => {
     });
   });
 
+  describe('extra_text', () => {
+    const i18n = {
+      getLocalizedState: (_entityId, state, cfg) =>
+        cfg?.state_map?.[state] ?? state,
+    };
+
+    const climate = {
+      state: 'cool',
+      last_changed: new Date().toISOString(),
+      attributes: { friendly_name: 'AC', temperature: 24 },
+    };
+
+    const withExtra = (extra_text, resolveEntity) =>
+      transformState(
+        'climate.salon',
+        climate,
+        mockHass,
+        [{ entity: 'climate.salon', extra_text }],
+        i18n,
+        resolveEntity
+      );
+
+    it('interpolates own attributes and other entities', () => {
+      const result = withExtra('{temperature}°C · {sensor.hum}%', (id) =>
+        id === 'sensor.hum' ? { state: '48' } : null
+      );
+
+      expect(result.extra).toBe('24°C · 48%');
+    });
+
+    it('passes a placeholder-free template straight through', () => {
+      expect(withExtra('Climatización').extra).toBe('Climatización');
+    });
+
+    it('is empty when unconfigured', () => {
+      expect(withExtra(null).extra).toBe('');
+      expect(withExtra(undefined).extra).toBe('');
+      expect(withExtra('').extra).toBe('');
+    });
+
+    it('collapses to empty when nothing resolves, so no blank line is drawn', () => {
+      // A sensor that has gone missing leaves only the template's whitespace.
+      expect(withExtra(' {sensor.gone} ', () => null).extra).toBe('');
+    });
+
+    it('never appends unit_of_measurement', () => {
+      // The template carries its own units, unlike a plain state label.
+      const result = transformState(
+        'sensor.temp',
+        {
+          state: '23',
+          last_changed: new Date().toISOString(),
+          attributes: { unit_of_measurement: '°C' },
+        },
+        mockHass,
+        [{ entity: 'sensor.temp', extra_text: '{state} grados' }],
+        i18n
+      );
+
+      expect(result.extra).toBe('23 grados');
+      expect(result.state).toBe('23 °C'); // the state line still gets it
+    });
+  });
+
   describe('state_map default', () => {
     // The real engine, so the catch-all is resolved the way the card does it.
     const i18n = new TranslationEngine({ 'en-us': { status: {} } });

@@ -105,13 +105,19 @@ class TimelineCard extends HTMLElement {
       );
     }
 
+    // `extra_text` is resolved here rather than at render time so that
+    // everything downstream — collectReferencedEntities() below, both transform
+    // paths — sees one already-merged value per entity and needs no access to
+    // the card config. `??` rather than `||`: an explicit `extra_text: ''` on an
+    // entity suppresses a card-wide default instead of inheriting it.
     this.entities = config.entities.map((e) =>
       typeof e === 'string'
-        ? { entity: e }
+        ? { entity: e, extra_text: config.extra_text ?? null }
         : {
             ...e,
             name_color: e.name_color || null,
             state_color: e.state_color || null,
+            extra_text: e.extra_text ?? config.extra_text ?? null,
           }
     );
 
@@ -372,7 +378,8 @@ class TimelineCard extends HTMLElement {
         logbookEntries,
         this.entities,
         this.hassInst,
-        this.config
+        this.config,
+        (entityId, time) => index.at(entityId, time)
       )
     );
 
@@ -500,7 +507,8 @@ class TimelineCard extends HTMLElement {
       data,
       this.hassInst,
       this.entities,
-      timeMs
+      timeMs,
+      (entityId) => this.hassInst?.states?.[entityId] ?? null
     );
 
     // No `old_state` parity check and no collapse_duplicates pass, unlike
@@ -745,6 +753,31 @@ class TimelineCard extends HTMLElement {
       );
       const stateColor = entityCfg.state_color || this.stateColor || '';
 
+      const timeHtml = `<div class="time">${
+        this.relativeTimeEnabled
+          ? relativeTime(item.time, this.i18n)
+          : formatAbsoluteTime(item.time, this.languageCode, this.i18n, {
+              includeDate: this.showDate,
+            })
+      }</div>`;
+
+      // An extra line that resolved to nothing (missing sensor, absent
+      // attribute) is dropped rather than drawn empty — otherwise it leaves a
+      // gap in the meta row on one side of the timeline and not the other.
+      const extraHtml = item.extra
+        ? `<div class="secondary-text extra">${item.extra}</div>`
+        : ``;
+
+      // `force_multiline` gives every field its own line, so the meta row is
+      // ordered for reading down the box (name / state / extra / time). Single
+      // line reads across instead, with the timestamp first: "10:24  22°C".
+      // Done here rather than with CSS `order` because `auto-multiline` only
+      // wraps when it has to, and `order` can't tell whether it wrapped —
+      // it would flip the reading order at an arbitrary box width.
+      const metaRow = this.forceMultiline
+        ? `${extraHtml}${timeHtml}`
+        : `${timeHtml}${extraHtml}`;
+
       const renderEventBox = () => `
         <div class="${eventBoxClassName}" data-entity-id="${item.id}">
           ${
@@ -775,17 +808,8 @@ class TimelineCard extends HTMLElement {
                   : ``
               }
             </div>
-            <div class="time">
-              ${
-                this.relativeTimeEnabled
-                  ? relativeTime(item.time, this.i18n)
-                  : formatAbsoluteTime(
-                      item.time,
-                      this.languageCode,
-                      this.i18n,
-                      { includeDate: this.showDate }
-                    )
-              }
+            <div class="row row-meta">
+              ${metaRow}
             </div>
           </div>
         </div>

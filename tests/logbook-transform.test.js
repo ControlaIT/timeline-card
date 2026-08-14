@@ -119,6 +119,24 @@ describe('transformLogbookEntry', () => {
     expect(item.time.toISOString()).toBe('2026-07-31T15:28:24.806Z');
   });
 
+  it('resolves extra_text through the supplied event-time state lookup', () => {
+    const item = transformLogbookEntry(
+      MANUAL_ENTRY,
+      hass,
+      [
+        {
+          entity: 'binary_sensor.numa_granadavega_401_motion_group',
+          extra_text: 'T amb. actual: {sensor.room_temperature} °C',
+        },
+      ],
+      1785511704806,
+      (entityId) =>
+        entityId === 'sensor.room_temperature' ? { state: '29' } : null
+    );
+
+    expect(item.extra).toBe('T amb. actual: 29 °C');
+  });
+
   it('lets the configured name win, keeping the name column consistent', () => {
     // logbook.log requires a `name`, so an entry always carries one — here the
     // literal word 'climate', which would otherwise label this row differently

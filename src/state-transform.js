@@ -54,6 +54,24 @@ export function transformState(
       ? `${localizedState} ${unit}`
       : localizedState;
 
+  // The optional extra line. Always a template — even one without placeholders
+  // — so it never gets unit_of_measurement appended: whatever units it needs it
+  // spells out itself, same as a templated state label. Resolved through the
+  // same `resolveEntity`, so a past event's extra line reports the values of its
+  // own moment rather than the current ones.
+  //
+  // Trimmed, because an unresolvable token ("{sensor.gone}°C" on a sensor that
+  // no longer exists) collapses to whitespace and the renderer treats an empty
+  // string as "no extra line" rather than drawing an empty row.
+  const extra =
+    typeof cfg.extra_text === 'string' && cfg.extra_text
+      ? interpolate(cfg.extra_text, {
+          state: rawState,
+          attributes: newState.attributes,
+          resolveEntity,
+        }).trim()
+      : '';
+
   return {
     id: entityId,
     name,
@@ -61,6 +79,7 @@ export function transformState(
     icon_color,
     entity_picture,
     state: stateWithUnit,
+    extra,
     raw_state: rawState,
     time: new Date(newState.last_changed), // must be Date() for relative_time
 

@@ -259,8 +259,8 @@ ha-card {
 
 /* `align-items` ranges each block towards the line, but only shrinks blocks that
    are narrower than the box. A block filling the full width has nothing left to
-   range — `force_multiline` gives `.state` `flex-basis: 100%`, and a long state
-   or timestamp fills the line on its own — so its text needs aligning too.
+   range — `force_multiline` gives every field `flex-basis: 100%`, and a long
+   state or timestamp fills the line on its own — so its text needs aligning too.
    Inherited, so name/state/time all follow. */
 .wrapper.mirror .side.left .text {
   align-items: flex-end;
@@ -326,9 +326,20 @@ ha-icon {
   opacity: 0.75;
 }
 
+/* The second row: timestamp plus the optional `extra_text` line. Roomier than
+   `.row`'s 4px, which is too tight to read "10:24" and "22°C" as two separate
+   values sitting side by side. */
+.row-meta {
+  column-gap: 8px;
+}
+
+.extra {
+  min-width: 0;
+}
+
 /* MULTILINE MODES
    allow_multiline: Wraps when text would overflow.
-   force_multiline: Always places state below the name.
+   force_multiline: Always gives every field a line of its own.
 */
 .event-box.auto-multiline .row,
 .event-box.force-multiline .row {
@@ -338,10 +349,17 @@ ha-icon {
   row-gap: 0;
 }
 
+.event-box.auto-multiline .row-meta,
+.event-box.force-multiline .row-meta {
+  column-gap: 8px;
+}
+
 .event-box.auto-multiline .name,
 .event-box.auto-multiline .state,
+.event-box.auto-multiline .extra,
 .event-box.force-multiline .name,
-.event-box.force-multiline .state {
+.event-box.force-multiline .state,
+.event-box.force-multiline .extra {
   white-space: nowrap; /* no extra line breaks */
   overflow: hidden; /* keep content inside the box */
   text-overflow: ellipsis; /* ... for overlength */
@@ -356,8 +374,10 @@ ha-icon {
   text-overflow: ellipsis;
 }
 
-.event-box.force-multiline .state {
-  flex-basis: 100%; /* always its own line */
+/* One field per line — name, state, extra and time each claim the full width
+   and so each wrap onto their own row. */
+.event-box.force-multiline .row > * {
+  flex-basis: 100%;
 }
 
 /* adds a bit more breathing room when text wraps */

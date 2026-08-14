@@ -170,4 +170,43 @@ describe('collectReferencedEntities', () => {
     expect(collectReferencedEntities([{ entity: 'a.b' }])).toEqual([]);
     expect(collectReferencedEntities()).toEqual([]);
   });
+
+  it('finds external entities referenced by extra_text', () => {
+    // Missed here, the sensor is absent from the history request and every past
+    // event renders its extra line with an empty value.
+    const entities = [
+      {
+        entity: 'climate.salon',
+        extra_text: '{temperature}°C · {sensor.salon_humedad}%',
+      },
+    ];
+
+    expect(collectReferencedEntities(entities)).toEqual([
+      'sensor.salon_humedad',
+    ]);
+  });
+
+  it('collects across state_map and extra_text together', () => {
+    const entities = [
+      {
+        entity: 'climate.salon',
+        state_map: { cool: 'Frío {sensor.salon_temp}°C' },
+        extra_text: '{sensor.salon_clima.humidity}%',
+      },
+    ];
+
+    expect(collectReferencedEntities(entities).sort()).toEqual([
+      'sensor.salon_clima',
+      'sensor.salon_temp',
+    ]);
+  });
+
+  it('ignores a non-string or absent extra_text', () => {
+    expect(
+      collectReferencedEntities([{ entity: 'a.b', extra_text: null }])
+    ).toEqual([]);
+    expect(
+      collectReferencedEntities([{ entity: 'a.b', extra_text: 42 }])
+    ).toEqual([]);
+  });
 });

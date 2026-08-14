@@ -62,6 +62,7 @@
    3. [Per-entity visibility](#per-entity-visibility)
    4. [A label for any state](#a-label-for-any-state)
    5. [State label placeholders](#state-label-placeholders)
+   6. [Extra line](#extra-line)
 5. [Examples](#examples)
    1. [Presence Timeline](#presence-timeline)
    2. [Door Monitoring](#door-monitoring)
@@ -80,6 +81,7 @@
 - Global limit for the number of events shown
 - Overflow handling: collapse extra entries or use a scrollable container
 - Per-entity configuration (name, icons, colors, status labels, filters)
+- Optional extra line per event, templated from any entity's state or attributes
 - Fully configurable via the Home Assistant UI editor
 - Compact layout option to reduce vertical space
 - Localized relative time (e.g. "5 minutes ago") or absolute datetime
@@ -191,10 +193,11 @@ entities:
 | `show_names`               | boolean | no       | true       | Show entity names                                                                                                                                                                                                   |
 | `show_states`              | boolean | no       | true       | Show entity states                                                                                                                                                                                                  |
 | `show_icons`               | boolean | no       | true       | Show entity icons                                                                                                                                                                                                   |
+| `extra_text`               | string  | no       | -          | An [extra line](#extra-line) under the state, using the same `{...}` [placeholders](#state-label-placeholders). Any entity can override it                                                                          |
 | `language`                 | string  | no       | auto       | Language code (default `en-US`; supports `cs`, `en-US`, `en-GB`, `de`, `fr`, `it`, `nl`, `pl`, `pt-BR`, `ru`, `sv`)                                                                                                 |
 | `refresh_interval`         | number  | no       | -          | Auto-refresh interval in seconds (background refresh)                                                                                                                                                               |
 | `allow_multiline`          | boolean | no       | false      | Enables automatic multiline wrapping for long names/states                                                                                                                                                          |
-| `force_multiline`          | boolean | no       | false      | Always place the state on a new line below the name                                                                                                                                                                 |
+| `force_multiline`          | boolean | no       | false      | Always give each field its own line: name, state, [extra line](#extra-line), time                                                                                                                                   |
 | `card_layout`              | string  | no       | center     | Layout mode: `center` (alternating), `left` (timeline left, cards right), `right` (timeline right, cards left)                                                                                                      |
 | `compact_layout`           | boolean | no       | false      | Overlaps alternating rows to reduce vertical height (only with `card_layout: center`)                                                                                                                               |
 | `card_background`          | string  | no       | -          | Card background color (supports hex/rgb/rgba)                                                                                                                                                                       |
@@ -589,6 +592,7 @@ entities:
 | `icon_color`               | string  | Static icon color                                                                                                                                                                          |
 | `icon_color_map`           | object  | State -> color mapping                                                                                                                                                                     |
 | `state_map`                | object  | State -> label override; the key [`default`](#a-label-for-any-state) covers every state not listed. Labels can pull in live values with `{...}` [placeholders](#state-label-placeholders). |
+| `extra_text`               | string  | An [extra line](#extra-line) for this entity only, overriding the card's. Same `{...}` [placeholders](#state-label-placeholders); set to `''` to suppress a card-wide one                  |
 | `include_states`           | list    | Only include events with these raw states                                                                                                                                                  |
 | `exclude_states`           | list    | Hide events with these raw states (alternative to `include_states`)                                                                                                                        |
 | `show_entity_picture`      | boolean | Show the entity picture instead of the icon when available                                                                                                                                 |
@@ -726,6 +730,60 @@ Notes:
   history response includes the value it carried into the range.
 - Filters (`include_states`, `collapse_duplicates`, colors, icons) all still work
   off the **raw** state, not the rendered label.
+
+---
+
+<a id="extra-line"></a>
+
+### Extra line
+
+`extra_text` adds one more line to every event, on top of the name, the state and
+the timestamp. It uses the same `{...}` tokens as a `state_map` label — and the
+same point-in-time resolution — but is independent of the state, so it renders on
+every event rather than only on the states a map happens to name:
+
+```yaml
+type: custom:timeline-card
+hours: 12
+limit: 30
+extra_text: '{sensor.salon_temp}°C' # card-wide default
+entities:
+  - entity: climate.salon
+    extra_text: '{temperature}°C · {sensor.salon_humedad}%' # overrides it
+  - entity: binary_sensor.puerta
+    extra_text: '' # opts out entirely
+```
+
+Precedence is entity → card → none, and `''` on an entity suppresses a card-wide
+default instead of inheriting it (so a card can set one line for most entities
+and switch it off for the odd one). The visual editor's empty field means
+"inherit" — the explicit opt-out is YAML-only.
+
+**Where the line goes** depends on the wrapping mode:
+
+| Mode                    | Layout                                    |
+| ----------------------- | ----------------------------------------- |
+| Default                 | `name · state` / `time · extra`           |
+| `allow_multiline: true` | Same, wrapping onto more lines if it must |
+| `force_multiline: true` | `name` / `state` / `extra` / `time`       |
+
+An `extra_text` that resolves to nothing — a sensor that's gone, an attribute the
+entity doesn't have — is dropped rather than drawn as a blank line, so an entity
+that only sometimes carries a value doesn't leave holes down the timeline.
+
+Notes:
+
+- **The unit is never appended.** Like a templated `state_map` label, the template
+  spells out its own formatting; `unit_of_measurement` is not added on top.
+- **It renders as secondary text**, in the same muted style as the state and the
+  timestamp. There's no `extra_color` yet.
+- **Logbook entries support external placeholders.** Their own state and
+  attributes do not exist, so `{state}` and own-attribute tokens resolve empty;
+  references such as `{sensor.room_temperature}` resolve at the Logbook entry's
+  timestamp, just like history events. This lets an automation row show the
+  ambient temperature when it applied a climate command.
+- Entities referenced only by an `extra_text` ride along on the same history
+  request as the rest, exactly like the ones referenced by a `state_map` label.
 
 ---
 

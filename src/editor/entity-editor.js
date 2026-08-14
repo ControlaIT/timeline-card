@@ -356,6 +356,29 @@ class TimelineCardEntityEditor extends LitElement {
 
               <div class="tc-setting-block">
                 <div class="tc-setting-label">
+                  <div class="tc-setting-title">Extra line</div>
+                  <div class="tc-setting-description">
+                    An extra line under the state, using the same placeholders
+                    as the labels above: <code>{state}</code>,
+                    <code>{temperature}</code> (own attribute),
+                    <code>{sensor.x}</code> (another entity's state),
+                    <code>{sensor.x.humidity}</code> (its attribute). Resolved
+                    at each event's own point in time. Leave empty to inherit
+                    the card's setting.
+                  </div>
+                </div>
+                <input
+                  class="tc-text-input"
+                  style="width: 100%;"
+                  placeholder="{temperature}°C · {sensor.salon_humedad}%"
+                  .value=${cfg.extra_text || ''}
+                  @input=${(e) =>
+                    this._updateField('extra_text', e.target.value)}
+                />
+              </div>
+
+              <div class="tc-setting-block">
+                <div class="tc-setting-label">
                   <div class="tc-setting-title">Icon map</div>
                   <div class="tc-setting-description">
                     Select icons per state (uses MDI names).

@@ -134,7 +134,9 @@ export function transformLogbook(
     const resolveEntity = resolveEntityAt
       ? (entityId) => resolveEntityAt(entityId, timeMs)
       : undefined;
-    items.push(transformLogbookEntry(entry, hass, entities, timeMs, resolveEntity));
+    items.push(
+      transformLogbookEntry(entry, hass, entities, timeMs, resolveEntity)
+    );
   }
 
   return items;

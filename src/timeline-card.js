@@ -28,6 +28,11 @@ import { transformHistory } from './history-transform.js';
 import { buildHistoryIndex } from './history-index.js';
 import { createLiveReferenceTracker } from './live-reference-engine.js';
 import { escapeHtml } from './html-escape.js';
+import {
+  findListed,
+  insertByTime,
+  orderPendingEvents,
+} from './pending-events.js';
 import { collectReferencedEntities } from './placeholder-engine.js';
 import { filterHistory, passesValueFilter } from './history-filter.js';
 
@@ -245,8 +250,9 @@ class TimelineCard extends HTMLElement {
     // first history load (cache or network) has populated `this.items`, then
     // replay them through the normal path so the dedup check has real data.
     this._historyReady = false;
-    this._pendingLiveEvents = [];
-    this._pendingLogbookEvents = [];
+    // State changes and logbook entries share one buffer, replayed in time
+    // order — see pending-events.js.
+    this._pendingEvents = [];
     this._liveReferences = createLiveReferenceTracker();
 
     // Per-entity memory of the value held before an unavailable/unknown gap,
@@ -412,23 +418,47 @@ class TimelineCard extends HTMLElement {
 
   // Marks the initial history load as complete and replays any live events
   // that arrived while `this.items` was still empty/stale, through the same
-  // processLiveEvent() path used for events arriving after this point — so
-  // collapse_duplicates (and any other this.items-dependent logic) sees them
-  // in the same order they actually happened, compared against real data.
+  // processLiveEvent()/processLogbookEvent() paths used for events arriving
+  // after this point — so collapse_duplicates (and any other
+  // this.items-dependent logic) sees them in the order they actually happened,
+  // compared against real data. Both sources replay interleaved by time; an
+  // event the history response already carried isn't inserted again (see
+  // pending-events.js), checked against `_replayBaseline` — the rows that were
+  // there before the replay, and only during it.
   _markHistoryReady() {
     if (this._historyReady) return;
     this._historyReady = true;
 
-    const pending = this._pendingLiveEvents;
-    this._pendingLiveEvents = [];
-    for (const data of pending) {
-      this.processLiveEvent(data);
+    const pending = orderPendingEvents(this._pendingEvents);
+    this._pendingEvents = [];
+    this._replayBaseline = [...this.items];
+    try {
+      for (const event of pending) {
+        if (event.kind === 'logbook') {
+          this.processLogbookEvent(event.payload);
+        } else {
+          this.processLiveEvent(event.payload);
+        }
+      }
+    } finally {
+      this._replayBaseline = null;
     }
+  }
 
-    const pendingLogbook = this._pendingLogbookEvents;
-    this._pendingLogbookEvents = [];
-    for (const msg of pendingLogbook) {
-      this.processLogbookEvent(msg);
+  // Puts a live row in the list — or, when it's a replayed event the history
+  // already carried, keeps that row instead. Either way the row is tracked, so
+  // a referenced sensor written just after the event still updates its label:
+  // the history row was built before that write reached the recorder.
+  _insertLiveItem(item, transform) {
+    const listed =
+      this._replayBaseline && findListed(this._replayBaseline, item);
+    const row = listed || item;
+
+    if (!listed) insertByTime(this.items, item);
+    this._liveReferences.track(row, this.hassInst.states, transform);
+
+    if (this.limit && this.items.length > this.limit) {
+      this.items = this.items.slice(0, this.limit);
     }
   }
 
@@ -471,7 +501,11 @@ class TimelineCard extends HTMLElement {
       const timedData = { ...data, time_fired: msg.time_fired };
 
       if (!this._historyReady) {
-        this._pendingLiveEvents.push(timedData);
+        this._pendingEvents.push({
+          kind: 'state',
+          time: Date.parse(msg.time_fired),
+          payload: timedData,
+        });
         return;
       }
 
@@ -490,7 +524,11 @@ class TimelineCard extends HTMLElement {
       if (!entityIds.includes(data.entity_id)) return;
 
       if (!this._historyReady) {
-        this._pendingLogbookEvents.push(msg);
+        this._pendingEvents.push({
+          kind: 'logbook',
+          time: Date.parse(msg.time_fired),
+          payload: msg,
+        });
         return;
       }
 
@@ -530,14 +568,9 @@ class TimelineCard extends HTMLElement {
 
     // No `old_state` parity check and no collapse_duplicates pass, unlike
     // processLiveEvent(): neither applies to something that isn't a state
-    // change. Two identical messages are two things that happened twice.
-    this.items.unshift(item);
-    this._liveReferences.track(item, this.hassInst.states, transform);
-
-    if (this.limit && this.items.length > this.limit) {
-      this.items = this.items.slice(0, this.limit);
-    }
-
+    // change. Two identical messages are two things that happened twice — but
+    // the same entry replayed after the history already brought it is one.
+    this._insertLiveItem(item, transform);
     this.render();
   }
 
@@ -630,15 +663,9 @@ class TimelineCard extends HTMLElement {
     }
     // -------------------------------------------------
 
-    // Insert new event at the top
-    this.items.unshift(item);
-    this._liveReferences.track(item, this.hassInst.states, transform);
-
-    // Limit size
-    if (this.limit && this.items.length > this.limit) {
-      this.items = this.items.slice(0, this.limit);
-    }
-
+    // At its place by time, or not at all when the replay finds the history
+    // already brought it — trimmed to `limit` either way.
+    this._insertLiveItem(item, transform);
     this.render();
   }
 

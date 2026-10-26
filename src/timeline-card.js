@@ -26,6 +26,7 @@ import {
 } from './logbook-transform.js';
 import { transformHistory } from './history-transform.js';
 import { buildHistoryIndex } from './history-index.js';
+import { createLiveReferenceTracker } from './live-reference-engine.js';
 import { collectReferencedEntities } from './placeholder-engine.js';
 import { filterHistory, passesValueFilter } from './history-filter.js';
 
@@ -245,6 +246,7 @@ class TimelineCard extends HTMLElement {
     this._historyReady = false;
     this._pendingLiveEvents = [];
     this._pendingLogbookEvents = [];
+    this._liveReferences = createLiveReferenceTracker();
 
     // Per-entity memory of the value held before an unavailable/unknown gap,
     // so the live path can recognise an unchanged value coming back the same
@@ -456,18 +458,23 @@ class TimelineCard extends HTMLElement {
 
   startLiveEvents() {
     const entityIds = this.entities.map((e) => e.entity);
+    const watchedIds = new Set([...entityIds, ...this.referencedEntities]);
 
     this.liveUnsub = this.hassInst.connection.subscribeEvents((msg) => {
       const data = msg?.data;
       if (!data?.entity_id) return;
-      if (!entityIds.includes(data.entity_id)) return;
+      if (!watchedIds.has(data.entity_id)) return;
+
+      // Attribute-only updates keep last_changed: use the event timestamp for
+      // the reference window, including when replaying a buffered event.
+      const timedData = { ...data, time_fired: msg.time_fired };
 
       if (!this._historyReady) {
-        this._pendingLiveEvents.push(data);
+        this._pendingLiveEvents.push(timedData);
         return;
       }
 
-      this.processLiveEvent(data);
+      this.processLiveEvent(timedData);
     }, 'state_changed');
 
     if (!this.logbookEnabled) return;
@@ -502,12 +509,21 @@ class TimelineCard extends HTMLElement {
     // string here, unlike the epoch float `logbook/get_events` returns.
     const firedAt = Date.parse(msg.time_fired);
     const timeMs = Number.isNaN(firedAt) ? Date.now() : firedAt;
+    this._liveReferences.update({
+      entityId: data.entity_id,
+      time: timeMs,
+      items: this.items,
+    });
 
-    const item = transformLogbookEntry(
-      data,
-      this.hassInst,
-      this.entities,
-      timeMs,
+    const transform = (resolveEntity) =>
+      transformLogbookEntry(
+        data,
+        this.hassInst,
+        this.entities,
+        timeMs,
+        resolveEntity
+      );
+    const item = transform(
       (entityId) => this.hassInst?.states?.[entityId] ?? null
     );
 
@@ -515,6 +531,7 @@ class TimelineCard extends HTMLElement {
     // processLiveEvent(): neither applies to something that isn't a state
     // change. Two identical messages are two things that happened twice.
     this.items.unshift(item);
+    this._liveReferences.track(item, this.hassInst.states, transform);
 
     if (this.limit && this.items.length > this.limit) {
       this.items = this.items.slice(0, this.limit);
@@ -526,8 +543,24 @@ class TimelineCard extends HTMLElement {
   processLiveEvent(data) {
     const entityId = data.entity_id;
     const newState = data.new_state;
+    const time = Date.parse(
+      data.time_fired ?? newState?.last_updated ?? newState?.last_changed
+    );
+    if (
+      this._liveReferences.update({
+        entityId,
+        time,
+        items: this.items,
+        newState,
+        closePrevious: data.old_state?.state !== newState?.state,
+      })
+    ) {
+      this.render();
+    }
 
     const cfg = this.entities.find((e) => e.entity === entityId);
+    // Referenced entities participate in label updates, not in the timeline.
+    if (!cfg || !newState) return;
 
     // --- HA logbook parity (components/logbook/queries/common.py) ---
     // The logbook keeps a state row only when
@@ -571,16 +604,16 @@ class TimelineCard extends HTMLElement {
     }
     // ---------------------------------------------
 
-    const item = transformState(
-      entityId,
-      newState,
-      this.hassInst,
-      this.entities,
-      this.i18n,
-      // The event just happened, so the current states ARE the states at its
-      // point in time — no history lookup needed on this path.
-      (id) => this.hassInst?.states?.[id] ?? null
-    );
+    const transform = (resolveEntity) =>
+      transformState(
+        entityId,
+        newState,
+        this.hassInst,
+        this.entities,
+        this.i18n,
+        resolveEntity
+      );
+    const item = transform((id) => this.hassInst?.states?.[id] ?? null);
 
     if (!item) return;
 
@@ -598,6 +631,7 @@ class TimelineCard extends HTMLElement {
 
     // Insert new event at the top
     this.items.unshift(item);
+    this._liveReferences.track(item, this.hassInst.states, transform);
 
     // Limit size
     if (this.limit && this.items.length > this.limit) {
@@ -608,6 +642,7 @@ class TimelineCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._liveReferences?.clear();
     if (this.refreshTimer) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;

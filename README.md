@@ -736,6 +736,11 @@ Notes:
   next event: a change from there on belongs to that one, so two setpoints a
   second apart each keep their own value. The same margin applies to Logbook
   entries.
+- **Live rows also settle during that margin.** If a referenced entity changes
+  after a row appears, its label and extra text are recalculated from that
+  update. Other reference values and the row's own attributes stay as captured
+  for that event. Updates stop after 2 seconds or when the same entity produces
+  its next state change or Logbook entry.
 - Filters (`include_states`, `collapse_duplicates`, colors, icons) all still work
   off the **raw** state, not the rendered label.
 

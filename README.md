@@ -436,10 +436,17 @@ attribute-only change rather than a real transition. The `history` API exposes n
 `old_state`, so there the card applies the half it can check: a repeat of the
 previous value is not a state change, whatever wrote it.
 
+"Previous value" means the entity's real previous state, not the previous row
+left on screen: restart filtering runs before `include_states`,
+`exclude_states`, `min_value` and `max_value`. With `include_states: [on]`, a
+switch going `off → on → off → on` shows both activations.
+
 This is deliberately _not_ what `collapse_duplicates` does. That option is a
 display preference about runs of real events, and it decides which end of a run
 to keep — which is why it stays opt-in, and why turning it on is not a fix for
-restart noise. Where a repeated value is concerned they overlap: with
+restart noise. It also works on what's displayed: with `include_states: [on]`
+and `collapse_duplicates` on, those two activations read as one run and
+collapse. Where a repeated value is concerned they overlap: with
 `collapse_duplicates` on for an entity, its `collapse_duplicates_keep` setting
 wins, so a run still resolves to your chosen end of it.
 

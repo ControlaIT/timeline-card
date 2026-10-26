@@ -3,6 +3,48 @@ import {
   stripUnavailableArtifacts,
 } from './availability-filter.js';
 
+function shouldCollapse(cfg, globalConfig) {
+  return cfg.collapse_duplicates ?? globalConfig.collapse_duplicates ?? false;
+}
+
+// Logbook parity, second half of the rule quoted in availability-filter.js:
+// `States.state != OLD_STATE.state`. A row repeating the previous value of the
+// same entity is not a state change, whatever produced it — and on every
+// restart the recorder writes exactly such a row for each entity as HA rebuilds
+// its state machine. With no `unavailable` row in between (a clean shutdown
+// records none for entities that don't publish availability)
+// stripUnavailableArtifacts() can't see it, and it surfaces as a phantom event:
+// "Door: closed" for a door that never opened.
+//
+// processLiveEvent() already drops the live equivalent unconditionally, so
+// history has to match. This is not the same thing as collapse_duplicates —
+// that one is a display preference about runs of real events, which is why it
+// stays opt-in — so this is gated on the restart-artifact switch instead, and
+// `ignore_unavailable: false` still restores the raw feed. Where an entity has
+// collapse_duplicates on, its `collapse_duplicates_keep` decides instead.
+//
+// Runs on the full, unfiltered stream: "previous value" means the entity's
+// real previous state, which is what `old_state` gives the live path. Judged
+// after include_states/min_value instead, `off → on → off → on` filtered to
+// `on` would read as `on → on` and lose every activation but the first.
+function dropRepeatedStates(list, entities, globalConfig) {
+  const lastStates = {};
+
+  return list.filter((item) => {
+    if (item.kind === 'logbook') return true;
+
+    const cfg = entities.find((e) => e.entity === item.id) || {};
+    if (shouldCollapse(cfg, globalConfig)) return true;
+
+    const repeated =
+      shouldIgnoreUnavailable(cfg, globalConfig) &&
+      lastStates[item.id] === item.raw_state;
+
+    lastStates[item.id] = item.raw_state;
+    return !repeated;
+  });
+}
+
 // ------------------------------------
 // NEW: Collapse consecutive duplicates
 // ------------------------------------
@@ -23,33 +65,9 @@ function collapseDuplicates(list, entities, globalConfig) {
 
     const cfg = entities.find((e) => e.entity === item.id) || {};
 
-    // Entity → YAML → fallback to global
-    const collapse =
-      cfg.collapse_duplicates ?? globalConfig.collapse_duplicates ?? false;
-
-    if (!collapse) {
-      // Logbook parity, second half of the rule quoted in availability-filter.js:
-      // `States.state != OLD_STATE.state`. A row repeating the previous value of
-      // the same entity is not a state change, whatever produced it — and on
-      // every restart the recorder writes exactly such a row for each entity as
-      // HA rebuilds its state machine. With no `unavailable` row in between (a
-      // clean shutdown records none for entities that don't publish
-      // availability) stripUnavailableArtifacts() can't see it, and it surfaces
-      // as a phantom event: "Door: closed" for a door that never opened.
-      //
-      // processLiveEvent() already drops the live equivalent unconditionally, so
-      // history has to match. This is not the same thing as collapse_duplicates
-      // — that one is a display preference about runs of real events, which is
-      // why it stays opt-in — so this is gated on the restart-artifact switch
-      // instead, and `ignore_unavailable: false` still restores the raw feed.
-      if (
-        shouldIgnoreUnavailable(cfg, globalConfig) &&
-        lastStates[item.id] === item.raw_state
-      ) {
-        continue;
-      }
-
-      lastStates[item.id] = item.raw_state;
+    // Entity → YAML → fallback to global. Collapsing works on the events
+    // left after include_states/min_value — "consecutive" as displayed.
+    if (!shouldCollapse(cfg, globalConfig)) {
       collapsed.push(item);
       continue;
     }
@@ -103,19 +121,23 @@ export function passesValueFilter(raw_state, cfg) {
 }
 
 export function filterHistory(items, entities, limit, globalConfig = {}) {
+  // Restart artifacts first, on the whole stream sorted OLDEST first: both
+  // steps judge a row against the entity's real previous one, which the
+  // state/value filters below would otherwise have removed. The unavailable
+  // pass must also precede dropRepeatedStates()/collapseDuplicates(), which
+  // cannot see through the gap an `unavailable` opens in a run.
+  let filtered = [...items].sort((a, b) => a.time - b.time);
+  filtered = stripUnavailableArtifacts(filtered, entities, globalConfig);
+  filtered = dropRepeatedStates(filtered, entities, globalConfig);
+
   // `include_states` / `exclude_states` / `min_value` / `max_value` all select
   // on the state a row reports. A logbook entry reports none, so there is
   // nothing for them to match — and left to run, `include_states` would reject
   // every one of them (`include.includes(null)` is false) while `min_value`
   // would too (`parseFloat(null)` is NaN). Filtering by state is a statement
   // about state rows; these pass through it.
-  let filtered = items.filter((ev) => {
+  filtered = filtered.filter((ev) => {
     if (ev.kind === 'logbook') return true;
-
-    // A contextOnly row (the synthetic window-start backfill, see
-    // history-transform.js) is never rendered, so a display filter has nothing
-    // to say about it — it only exists to seed stripUnavailableArtifacts().
-    if (ev.contextOnly) return true;
 
     const cfg = entities.find((e) => e.entity === ev.id);
     const include = Array.isArray(cfg?.include_states)
@@ -133,20 +155,11 @@ export function filterHistory(items, entities, limit, globalConfig = {}) {
   // Value-based filter (min_value / max_value)
   filtered = filtered.filter((ev) => {
     if (ev.kind === 'logbook') return true;
-    if (ev.contextOnly) return true;
     const cfg = entities.find((e) => e.entity === ev.id);
     return passesValueFilter(ev.raw_state, cfg);
   });
 
-  // Sort (OLDEST first) to keep the earliest event when collapsing
-  filtered = filtered.sort((a, b) => a.time - b.time);
-
-  // Drop unavailable/unknown entries and the restart artifacts they leave
-  // behind. Must run on the oldest-first list and before collapseDuplicates,
-  // which cannot see through the gap an `unavailable` opens in a run.
-  filtered = stripUnavailableArtifacts(filtered, entities, globalConfig);
-
-  // NEW: collapse duplicates
+  // NEW: collapse duplicates (on the oldest-first list, keeping the earliest)
   filtered = collapseDuplicates(filtered, entities, globalConfig);
 
   // Sort back to NEWEST first for display

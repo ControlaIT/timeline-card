@@ -1,3 +1,5 @@
+import { windowEnd } from './server-clock.js';
+
 /**
  * Fetches logbook entries over the WebSocket API.
  *
@@ -14,7 +16,7 @@
  * not take the history render down with it.
  */
 export async function fetchLogbook(hass, entities, hours) {
-  const end = new Date();
+  const end = windowEnd(hass.states);
   const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
 
   const entityIds = [...new Set(entities.map((e) => e.entity))];

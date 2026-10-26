@@ -5,6 +5,7 @@ import {
   insertByTime,
   orderPendingEvents,
 } from '../src/pending-events.js';
+import { latestStateTime, windowEnd } from '../src/server-clock.js';
 import {
   logbookItemKey,
   logbookKey,
@@ -71,6 +72,7 @@ function setup(
   card.i18n = new TranslationEngine({ 'en-us': {} });
   const listeners = {};
   const requests = [];
+  const unsubscribed = [];
   card.hassInst = {
     states: {
       [DOOR]: state('off', -1000),
@@ -80,18 +82,24 @@ function setup(
       subscribeEvents(callback, eventType) {
         requests.push({ type: 'subscribe_events', event_type: eventType });
         listeners[eventType] = callback;
-        return Promise.resolve(() => {});
+        return Promise.resolve(() => unsubscribed.push(eventType));
       },
       subscribeMessage(callback, message) {
         requests.push(message);
         if (streamError) return Promise.reject(streamError);
         listeners[message.type] = callback;
-        return Promise.resolve(() => {});
+        return Promise.resolve(() => unsubscribed.push(message.type));
       },
     },
     // What refreshInForeground() fetches: history/period and logbook/get_events.
-    callApi: () => Promise.resolve([historyRows]),
-    callWS: () => Promise.resolve(logbookEntries),
+    callApi: (method, path) => {
+      requests.push({ type: 'history/period', path });
+      return Promise.resolve([historyRows]);
+    },
+    callWS: (message) => {
+      requests.push(message);
+      return Promise.resolve(logbookEntries);
+    },
   };
   card.startLiveEvents();
 
@@ -114,7 +122,7 @@ function setup(
     listeners['logbook/event_stream']({ events });
   }
 
-  return { card, emit, log, stream, requests };
+  return { card, emit, log, stream, requests, unsubscribed };
 }
 
 describe('replaying events buffered during the initial load', () => {
@@ -277,6 +285,17 @@ describe('live logbook subscription', () => {
     ]);
   });
 
+  it('drops both subscriptions when the card is unmounted', async () => {
+    const { card, unsubscribed } = setup();
+    card.disconnectedCallback();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(unsubscribed.sort()).toEqual([
+      'logbook/event_stream',
+      'state_changed',
+    ]);
+  });
+
   it('handles a rejected subscription instead of leaving it unhandled', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { card } = setup(20, {}, { streamError: new Error('Unauthorized') });
@@ -379,6 +398,94 @@ describe('logbook stream overlap', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('initial load window on the server clock', () => {
+  it('ends at the newest last_updated when the browser runs behind', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(BASE - 22 * 1000); // browser 22 s behind
+    try {
+      const { card, requests } = setup();
+      await card.refreshInForeground();
+      const logbook = requests.find((r) => r.type === 'logbook/get_events');
+      const history = requests.find((r) => r.type === 'history/period');
+
+      // The newest last_updated HA has sent (the door's, at BASE - 1000) is
+      // also where the logbook stream starts: no gap between the two.
+      expect(logbook.end_time).toBe(stamp(-1000));
+      expect(history.path).toContain(`end_time=${stamp(-1000)}`);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the rows from just before an HA restart on the reload after it', async () => {
+    const { card } = setup();
+    const rows = [state('on', 1000), state('off', 5000)];
+    const entries = [logEntry(4500, 'Before the restart')];
+    // Answer like HA does: only what happened by `end_time`.
+    card.hassInst.callApi = (method, path) => {
+      const end = Date.parse(path.match(/end_time=([^&]+)/)[1]);
+      return Promise.resolve([
+        rows.filter((row) => Date.parse(row.last_changed) <= end),
+      ]);
+    };
+    card.hassInst.callWS = (message) =>
+      Promise.resolve(
+        entries.filter((e) => e.when * 1000 <= Date.parse(message.end_time))
+      );
+    // HA came back at +24 s and re-announced every state; the browser runs
+    // 22 s behind, so its "now" is still before the last rows.
+    card.hassInst.states[DOOR] = state('off', 24000);
+    vi.useFakeTimers();
+    vi.setSystemTime(BASE + 26000 - 22000);
+    try {
+      await card.refreshInBackground();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(card.items.map((i) => i.state)).toEqual(
+      expect.arrayContaining(['Before the restart'])
+    );
+    expect(card.items.map((i) => i.time.toISOString())).toEqual(
+      expect.arrayContaining([stamp(5000), stamp(1000)])
+    );
+  });
+
+  it('keeps the browser clock when it runs ahead', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(BASE + 10 * 1000);
+    try {
+      const { card, requests } = setup();
+      await card.refreshInForeground();
+      const logbook = requests.find((r) => r.type === 'logbook/get_events');
+
+      expect(logbook.end_time).toBe(stamp(10 * 1000));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('server-clock helpers', () => {
+  it('latestStateTime skips unreadable times', () => {
+    expect(
+      latestStateTime({
+        a: { last_updated: stamp(5) },
+        b: { last_updated: 'garbage' },
+        c: {},
+      })
+    ).toBe(BASE + 5);
+    expect(latestStateTime(undefined)).toBe(Number.NEGATIVE_INFINITY);
+  });
+
+  it('windowEnd takes the later of both clocks', () => {
+    const states = { a: { last_updated: stamp(5) } };
+    expect(windowEnd(states, BASE).toISOString()).toBe(stamp(5));
+    expect(windowEnd(states, BASE + 9).toISOString()).toBe(stamp(9));
+    expect(windowEnd({}, BASE).toISOString()).toBe(stamp(0));
   });
 });
 

@@ -1,3 +1,5 @@
+import { windowEnd } from './server-clock.js';
+
 /**
  * @param {string[]} extraEntityIds entities referenced by `state_map` labels but
  *   not shown themselves. Fetched in the same request so their values can be
@@ -5,7 +7,7 @@
  *   building the timeline.
  */
 export async function fetchHistory(hass, entities, hours, extraEntityIds = []) {
-  const end = new Date();
+  const end = windowEnd(hass.states);
   const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
 
   const startTime = start.toISOString();

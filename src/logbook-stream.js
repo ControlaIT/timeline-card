@@ -1,3 +1,5 @@
+import { latestStateTime } from './server-clock.js';
+
 // Live logbook rows come from `logbook/event_stream`, which doesn't only send
 // what happens from now on: on every subscribe it first sends what happened
 // since `start_time`. And home-assistant-js-websocket re-sends the very same
@@ -36,10 +38,6 @@ export function logbookItemKey(item) {
  * no states to read.
  */
 export function streamStartTime(states, fallbackMs = Date.now()) {
-  let latest = Number.NEGATIVE_INFINITY;
-  for (const state of Object.values(states ?? {})) {
-    const time = Date.parse(state?.last_updated);
-    if (Number.isFinite(time)) latest = Math.max(latest, time);
-  }
+  const latest = latestStateTime(states);
   return new Date(Number.isFinite(latest) ? latest : fallbackMs).toISOString();
 }

@@ -260,7 +260,7 @@ class TimelineCard extends HTMLElement {
     // order — see pending-events.js.
     this._pendingEvents = [];
 
-    // Newest logbook entry time already covered — see logbook-stream.js.
+    // Logbook entries already covered — see logbook-stream.js.
     this._logbookSeen = new Set();
     this._liveReferences = createLiveReferenceTracker();
 

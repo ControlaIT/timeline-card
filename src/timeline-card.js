@@ -379,7 +379,7 @@ class TimelineCard extends HTMLElement {
         this.entities,
         this.hassInst,
         this.config,
-        (entityId, time) => index.at(entityId, time)
+        index
       )
     );
 

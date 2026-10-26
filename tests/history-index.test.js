@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildHistoryIndex } from '../src/history-index.js';
+import {
+  buildHistoryIndex,
+  referenceLookahead,
+  REFERENCE_LOOKAHEAD_MS,
+} from '../src/history-index.js';
 
 const row = (entity_id, state, last_changed) => ({
   entity_id,
@@ -106,5 +110,95 @@ describe('buildHistoryIndex', () => {
     const index = buildHistoryIndex(series);
 
     expect(index.at('sensor.temp', new Date('nonsense'))).toBeNull();
+  });
+
+  describe('lookahead', () => {
+    // Sercotel 204: the template sensor follows the climate 2.4 ms later.
+    const derived = [
+      [
+        row('sensor.target', '25.0', '2026-10-22T22:00:00.000Z'),
+        row('sensor.target', '16.0', '2026-10-22T22:58:16.825Z'),
+        row('sensor.target', '21.0', '2026-10-22T23:10:00.000Z'),
+      ],
+    ];
+    const event = at('2026-10-22T22:58:16.822Z');
+
+    it('without it, misses a change made just after the time', () => {
+      const index = buildHistoryIndex(derived);
+
+      expect(index.at('sensor.target', event).state).toBe('25.0');
+    });
+
+    it('takes a change made within the margin after the time', () => {
+      const index = buildHistoryIndex(derived);
+
+      expect(index.at('sensor.target', event, 2000).state).toBe('16.0');
+    });
+
+    it('ignores a change made beyond the margin', () => {
+      const index = buildHistoryIndex(derived);
+
+      expect(
+        index.at('sensor.target', at('2026-10-22T23:09:00.000Z'), 2000).state
+      ).toBe('16.0');
+    });
+
+    it('returns a first row that falls inside the margin', () => {
+      const index = buildHistoryIndex(derived);
+
+      expect(
+        index.at('sensor.target', at('2026-10-22T21:59:59.000Z'), 2000).state
+      ).toBe('25.0');
+    });
+
+    it('treats a negative margin as none', () => {
+      const index = buildHistoryIndex(derived);
+
+      expect(index.at('sensor.target', event, -5000).state).toBe('25.0');
+    });
+  });
+
+  describe('nextAfter', () => {
+    it('returns the first row strictly after the time', () => {
+      const index = buildHistoryIndex(series);
+
+      expect(index.nextAfter('sensor.temp', at('2026-07-30T10:00:00Z'))).toBe(
+        at('2026-07-30T11:00:00Z').getTime()
+      );
+    });
+
+    it('returns null after the last row, for an unknown entity or a bad time', () => {
+      const index = buildHistoryIndex(series);
+
+      expect(
+        index.nextAfter('sensor.temp', at('2026-07-30T11:00:00Z'))
+      ).toBeNull();
+      expect(
+        index.nextAfter('sensor.missing', at('2026-07-30T10:00:00Z'))
+      ).toBeNull();
+      expect(index.nextAfter('sensor.temp', new Date('nonsense'))).toBeNull();
+    });
+  });
+});
+
+describe('referenceLookahead', () => {
+  const t = at('2026-10-22T22:58:16.000Z');
+
+  it('allows the full margin when nothing follows', () => {
+    expect(referenceLookahead(t, null)).toBe(REFERENCE_LOOKAHEAD_MS);
+  });
+
+  it('stops short of the next event', () => {
+    expect(referenceLookahead(t, t.getTime() + 1000)).toBe(999);
+  });
+
+  it('keeps the full margin when the next event is further away', () => {
+    expect(referenceLookahead(t, t.getTime() + 60000)).toBe(
+      REFERENCE_LOOKAHEAD_MS
+    );
+  });
+
+  it('allows nothing when the next event shares the millisecond', () => {
+    expect(referenceLookahead(t, t.getTime())).toBe(0);
   });
 });

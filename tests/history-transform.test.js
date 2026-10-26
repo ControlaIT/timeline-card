@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { transformHistory } from '../src/history-transform.js';
+import { buildHistoryIndex } from '../src/history-index.js';
 
 const mockI18n = {
   getLocalizedState: (_entityId, state) => state,
@@ -94,5 +95,117 @@ describe('transformHistory', () => {
     );
 
     expect(result).toHaveLength(0);
+  });
+
+  describe('state_map placeholders of another entity', () => {
+    const stateMapI18n = {
+      getLocalizedState: (_entityId, state, cfg) =>
+        cfg.state_map?.[state] ?? state,
+    };
+    // Sercotel 204, 22/10/2026: the target-temperature template sensor follows
+    // the climate 2.4 ms later.
+    const start = new Date('2026-10-22T22:00:00Z');
+    const climate = 'climate.sercotel_granadasuites_204_global_climate';
+    const target =
+      'sensor.sercotel_granadasuites_204_climate_target_temperature';
+    const roomEntities = [
+      { entity: climate, state_map: { heat: `Heat - {${target}} °C` } },
+    ];
+
+    const run = (targetChangedAt) => {
+      const data = [
+        [
+          {
+            entity_id: climate,
+            state: 'off',
+            last_changed: start.toISOString(),
+          },
+          {
+            entity_id: climate,
+            state: 'heat',
+            last_changed: '2026-10-22T22:58:16.822630Z',
+          },
+        ],
+        [
+          {
+            entity_id: target,
+            state: '25.0',
+            last_changed: start.toISOString(),
+          },
+          { entity_id: target, state: '16.0', last_changed: targetChangedAt },
+        ],
+      ];
+
+      const items = transformHistory(
+        { data, start },
+        roomEntities,
+        mockHassStates,
+        stateMapI18n,
+        buildHistoryIndex(data)
+      );
+      return items.find((i) => !i.contextOnly).state;
+    };
+
+    it('takes a value the referenced entity took just after the event', () => {
+      expect(run('2026-10-22T22:58:16.825013Z')).toBe('Heat - 16.0 °C');
+    });
+
+    it('ignores a change of the referenced entity well after the event', () => {
+      expect(run('2026-10-22T22:58:30.000000Z')).toBe('Heat - 25.0 °C');
+    });
+
+    it("doesn't lend the next event's value to the one before it", () => {
+      // Two setpoints a second apart, each followed 2 ms later by the sensor:
+      // within 2 s of the first event, but past the second one.
+      const data = [
+        [
+          {
+            entity_id: climate,
+            state: 'off',
+            last_changed: start.toISOString(),
+          },
+          {
+            entity_id: climate,
+            state: 'heat',
+            last_changed: '2026-10-22T22:58:16.000Z',
+          },
+          {
+            entity_id: climate,
+            state: 'heat',
+            last_changed: '2026-10-22T22:58:17.000Z',
+          },
+        ],
+        [
+          {
+            entity_id: target,
+            state: '25.0',
+            last_changed: start.toISOString(),
+          },
+          {
+            entity_id: target,
+            state: '16.0',
+            last_changed: '2026-10-22T22:58:16.002Z',
+          },
+          {
+            entity_id: target,
+            state: '21.0',
+            last_changed: '2026-10-22T22:58:17.002Z',
+          },
+        ],
+      ];
+
+      const items = transformHistory(
+        { data, start },
+        roomEntities,
+        mockHassStates,
+        stateMapI18n,
+        buildHistoryIndex(data)
+      );
+
+      expect(items.filter((i) => !i.contextOnly).map((i) => i.state)).toEqual([
+        'Heat - 16.0 °C',
+        'Heat - 21.0 °C',
+      ]);
+    });
   });
 });

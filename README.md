@@ -728,6 +728,14 @@ Notes:
   on screen.
 - A referenced entity that never changed during the window still resolves: the
   history response includes the value it carried into the range.
+- **A change up to 2 seconds after the event still counts as its value.** An
+  entity derived from the event's own one — a template sensor over a climate's
+  `temperature` — is written a few milliseconds later, so at the event's exact
+  timestamp it still holds the previous value: switching to `heat` at 16 °C
+  would otherwise read `Heat - 25 °C`. The margin stops at the same entity's
+  next event: a change from there on belongs to that one, so two setpoints a
+  second apart each keep their own value. The same margin applies to Logbook
+  entries.
 - Filters (`include_states`, `collapse_duplicates`, colors, icons) all still work
   off the **raw** state, not the rendered label.
 

@@ -454,6 +454,25 @@ describe('initial load window on the server clock', () => {
     );
   });
 
+  it('keeps the rows it has when a refresh fails while HA is down', async () => {
+    const { card, log } = setup();
+    card._historyReady = true;
+    log(1000);
+    card.hassInst.callApi = () => Promise.reject({ code: 'connection_lost' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(card.refreshInBackground()).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        'timeline-card: refresh failed',
+        expect.anything()
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(card.items.map((i) => i.state)).toEqual(['Checked']);
+  });
+
   it('keeps the browser clock when it runs ahead', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(BASE + 10 * 1000);

@@ -491,8 +491,17 @@ class TimelineCard extends HTMLElement {
     return !listed;
   }
 
+  // Runs unattended — from the cache path and `refresh_interval` — so nothing
+  // awaits it: a failure (HA restarting, the connection down) is logged and the
+  // rows on screen stay as they are until the next refresh succeeds.
   async refreshInBackground() {
-    const items = await this._buildItems();
+    let items;
+    try {
+      items = await this._buildItems();
+    } catch (err) {
+      console.warn('timeline-card: refresh failed', err);
+      return;
+    }
 
     if (JSON.stringify(items) === JSON.stringify(this.items)) return;
 

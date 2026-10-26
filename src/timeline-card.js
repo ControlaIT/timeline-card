@@ -27,6 +27,7 @@ import {
 import { transformHistory } from './history-transform.js';
 import { buildHistoryIndex } from './history-index.js';
 import { createLiveReferenceTracker } from './live-reference-engine.js';
+import { escapeHtml } from './html-escape.js';
 import { collectReferencedEntities } from './placeholder-engine.js';
 import { filterHistory, passesValueFilter } from './history-filter.js';
 
@@ -800,7 +801,7 @@ class TimelineCard extends HTMLElement {
       // attribute) is dropped rather than drawn empty — otherwise it leaves a
       // gap in the meta row on one side of the timeline and not the other.
       const extraHtml = item.extra
-        ? `<div class="secondary-text extra">${item.extra}</div>`
+        ? `<div class="secondary-text extra">${escapeHtml(item.extra)}</div>`
         : ``;
 
       // `force_multiline` gives every field its own line, so the meta row is
@@ -814,12 +815,12 @@ class TimelineCard extends HTMLElement {
         : `${timeHtml}${extraHtml}`;
 
       const renderEventBox = () => `
-        <div class="${eventBoxClassName}" data-entity-id="${item.id}">
+        <div class="${eventBoxClassName}" data-entity-id="${escapeHtml(item.id)}">
           ${
             showIcons
               ? showEntityPicture
-                ? `<img class="entity-picture" src="${entityPicture}" alt="">`
-                : `<ha-icon icon="${item.icon}" style="color:${item.icon_color};"></ha-icon>`
+                ? `<img class="entity-picture" src="${escapeHtml(entityPicture)}" alt="">`
+                : `<ha-icon icon="${escapeHtml(item.icon)}" style="color:${escapeHtml(item.icon_color)};"></ha-icon>`
               : ``
           }
           <div class="text">
@@ -828,7 +829,7 @@ class TimelineCard extends HTMLElement {
                 showNames
                   ? `<div class="primary-text name" style="${
                       nameColor ? `color:${nameColor};` : ''
-                    }">${item.name}</div>`
+                    }">${escapeHtml(item.name)}</div>`
                   : ``
               }
               ${
@@ -836,10 +837,10 @@ class TimelineCard extends HTMLElement {
                   ? showNames
                     ? `<div class="secondary-text state" style="${
                         stateColor ? `color:${stateColor};` : ''
-                      }">${item.state}</div>`
+                      }">${escapeHtml(item.state)}</div>`
                     : `<div class="primary-text state" style="${
                         stateColor ? `color:${stateColor};` : ''
-                      }">${this.capitalize(item.state)}</div>`
+                      }">${escapeHtml(this.capitalize(item.state))}</div>`
                   : ``
               }
             </div>

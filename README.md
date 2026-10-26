@@ -551,7 +551,12 @@ Use `logbook_icon` / `logbook_icon_color` per entity when you want these rows to
 stand out from the state changes around them.
 
 New events appear immediately, without waiting for `refresh_interval` — the card
-subscribes to the `logbook_entry` bus event alongside `state_changed`.
+subscribes to the logbook's own event stream (`logbook/event_stream`) alongside
+`state_changed`. That works for every Home Assistant user: non-admin users can't
+subscribe to the raw `logbook_entry` bus event. The stream starts on Home
+Assistant's clock rather than the browser's, and entries the card already shows
+are ignored when the stream resends them after a reconnect. If the subscription
+fails, new entries still arrive with the next refresh.
 
 ---
 

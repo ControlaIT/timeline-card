@@ -22,12 +22,18 @@ import {
   transformLogbook,
   transformLogbookEntry,
   isCustomLogbookEntry,
+  logbookEntryTime,
   shouldShowLogbook,
 } from './logbook-transform.js';
 import { transformHistory } from './history-transform.js';
 import { buildHistoryIndex } from './history-index.js';
 import { createLiveReferenceTracker } from './live-reference-engine.js';
 import { escapeHtml } from './html-escape.js';
+import {
+  logbookItemKey,
+  logbookKey,
+  streamStartTime,
+} from './logbook-stream.js';
 import {
   findListed,
   insertByTime,
@@ -253,6 +259,9 @@ class TimelineCard extends HTMLElement {
     // State changes and logbook entries share one buffer, replayed in time
     // order — see pending-events.js.
     this._pendingEvents = [];
+
+    // Newest logbook entry time already covered — see logbook-stream.js.
+    this._logbookSeen = new Set();
     this._liveReferences = createLiveReferenceTracker();
 
     // Per-entity memory of the value held before an unavailable/unknown gap,
@@ -338,6 +347,9 @@ class TimelineCard extends HTMLElement {
     );
 
     if (cached) {
+      this._noteLogbookSeen(
+        cached.filter((item) => item.kind === 'logbook').map(logbookItemKey)
+      );
       this.items = cached;
       this.render();
       this._markHistoryReady();
@@ -366,6 +378,13 @@ class TimelineCard extends HTMLElement {
         ? fetchLogbook(this.hassInst, this.entities, this.hours)
         : Promise.resolve([]),
     ]);
+
+    // Whatever this load brought, the stream mustn't add a second time.
+    this._noteLogbookSeen(
+      logbookEntries.map((entry) =>
+        logbookKey(entry.entity_id, logbookEntryTime(entry), entry.message)
+      )
+    );
 
     // Built from the raw response so referenced entities can be read at each
     // event's own timestamp rather than as they are now.
@@ -398,6 +417,10 @@ class TimelineCard extends HTMLElement {
       this.limit,
       this.config // includes collapse_duplicates
     );
+  }
+
+  _noteLogbookSeen(keys) {
+    for (const key of keys) this._logbookSeen.add(key);
   }
 
   async refreshInForeground() {
@@ -449,17 +472,23 @@ class TimelineCard extends HTMLElement {
   // already carried, keeps that row instead. Either way the row is tracked, so
   // a referenced sensor written just after the event still updates its label:
   // the history row was built before that write reached the recorder.
-  _insertLiveItem(item, transform) {
-    const listed =
-      this._replayBaseline && findListed(this._replayBaseline, item);
-    const row = listed || item;
+  //
+  // `known` marks a logbook entry the card has already covered (see
+  // logbook-stream.js): it's never inserted, only matched against the current
+  // list so its row stays tracked. Returns whether a row was inserted.
+  _insertLiveItem(item, transform, { known = false } = {}) {
+    const baseline = known ? this.items : this._replayBaseline;
+    const listed = baseline && findListed(baseline, item);
+    if (known && !listed) return false;
 
+    const row = listed || item;
     if (!listed) insertByTime(this.items, item);
     this._liveReferences.track(row, this.hassInst.states, transform);
 
     if (this.limit && this.items.length > this.limit) {
       this.items = this.items.slice(0, this.limit);
     }
+    return !listed;
   }
 
   async refreshInBackground() {
@@ -518,45 +547,74 @@ class TimelineCard extends HTMLElement {
     // it needs a subscription of its own — without it these rows would only
     // appear on the next poll, and not at all on a card with no
     // `refresh_interval`.
-    this.logbookUnsub = this.hassInst.connection.subscribeEvents((msg) => {
-      const data = msg?.data;
-      if (!data?.entity_id) return;
-      if (!entityIds.includes(data.entity_id)) return;
+    //
+    // Not a raw subscribe_events on `logbook_entry`: Home Assistant only lets
+    // non-admin users subscribe to an allowlist of bus events, and that one
+    // isn't on it. `logbook/event_stream` is the logbook's own subscription,
+    // open to every user, and carries the same entries `logbook/get_events`
+    // returns — state rows and automation triggers included, which
+    // processLogbookEvent() filters out exactly as the history load does.
+    // Started on the server's clock, and deduplicated against what the card
+    // already has — see logbook-stream.js.
+    this.logbookUnsub = this.hassInst.connection
+      .subscribeMessage(
+        (msg) => {
+          for (const entry of msg?.events ?? []) {
+            if (!entityIds.includes(entry?.entity_id)) continue;
 
-      if (!this._historyReady) {
-        this._pendingEvents.push({
-          kind: 'logbook',
-          time: Date.parse(msg.time_fired),
-          payload: msg,
-        });
-        return;
-      }
+            if (!this._historyReady) {
+              this._pendingEvents.push({
+                kind: 'logbook',
+                // 0 is logbookEntryTime()'s "unreadable": sorted last, not first.
+                time: logbookEntryTime(entry) || NaN,
+                payload: entry,
+              });
+              continue;
+            }
 
-      this.processLogbookEvent(msg);
-    }, 'logbook_entry');
+            this.processLogbookEvent(entry);
+          }
+        },
+        {
+          type: 'logbook/event_stream',
+          start_time: streamStartTime(this.hassInst.states),
+          entity_ids: entityIds,
+        }
+      )
+      // A failed subscription (an HA without the command, the recorder off)
+      // costs only the live logbook rows; history and polling still bring
+      // them, as with fetchLogbook().
+      .catch((err) => {
+        console.warn('timeline-card: logbook/event_stream failed', err);
+        return null;
+      });
   }
 
-  processLogbookEvent(msg) {
-    const data = msg?.data;
-    if (!isCustomLogbookEntry(data)) return;
+  processLogbookEvent(entry) {
+    if (!isCustomLogbookEntry(entry)) return;
 
-    const cfg = this.entities.find((e) => e.entity === data.entity_id);
+    const cfg = this.entities.find((e) => e.entity === entry.entity_id);
     if (!shouldShowLogbook(cfg, this.config)) return;
 
-    // The bus payload is `{name, message, domain, entity_id}` — it has no
-    // `when`, so the time comes off the event envelope. `time_fired` is an ISO
-    // string here, unlike the epoch float `logbook/get_events` returns.
-    const firedAt = Date.parse(msg.time_fired);
-    const timeMs = Number.isNaN(firedAt) ? Date.now() : firedAt;
+    // Stream entries carry `when` like the ones logbook/get_events returns, so
+    // live and history rows share one clock.
+    const timeMs = logbookEntryTime(entry) || Date.now();
+
+    // Already shown — by the history load, or by the stream before a
+    // reconnect made it replay everything since `start_time`.
+    const key = logbookKey(entry.entity_id, timeMs, entry.message);
+    const known = this._logbookSeen.has(key);
+    this._logbookSeen.add(key);
+
     this._liveReferences.update({
-      entityId: data.entity_id,
+      entityId: entry.entity_id,
       time: timeMs,
       items: this.items,
     });
 
     const transform = (resolveEntity) =>
       transformLogbookEntry(
-        data,
+        entry,
         this.hassInst,
         this.entities,
         timeMs,
@@ -570,8 +628,7 @@ class TimelineCard extends HTMLElement {
     // processLiveEvent(): neither applies to something that isn't a state
     // change. Two identical messages are two things that happened twice — but
     // the same entry replayed after the history already brought it is one.
-    this._insertLiveItem(item, transform);
-    this.render();
+    if (this._insertLiveItem(item, transform, { known })) this.render();
   }
 
   processLiveEvent(data) {

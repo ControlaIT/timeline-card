@@ -35,9 +35,9 @@ export function orderPendingEvents(events) {
  * The row in `items` that is the same event as `item`, if any — not just the
  * same value: same entity, same kind, same instant and same state (or message).
  *
- * The instant is compared within 1 ms: history gives a logbook entry's time
- * as an epoch float (`when`) and the live bus as an ISO string (`time_fired`),
- * and the two can land on either side of a millisecond.
+ * The instant is compared within 1 ms: a logbook entry's `when` is an epoch
+ * float with sub-millisecond digits, and a state row's time comes from an ISO
+ * string truncated to the millisecond — close enough to land on either side.
  */
 export function findListed(items, item) {
   const time = item.time.getTime();

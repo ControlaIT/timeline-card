@@ -5,6 +5,11 @@ import {
   insertByTime,
   orderPendingEvents,
 } from '../src/pending-events.js';
+import {
+  logbookItemKey,
+  logbookKey,
+  streamStartTime,
+} from '../src/logbook-stream.js';
 
 vi.mock('../src/editor/timeline-card-editor.js', () => ({}));
 vi.mock('../src/timeline-card.css', () => ({ default: '' }));
@@ -41,18 +46,31 @@ const state = (value, offset, entity_id = DOOR) => ({
   attributes: {},
 });
 
+// A logbook.log entry as logbook/get_events and logbook/event_stream send it.
+const logEntry = (offset, message = 'Checked') => ({
+  entity_id: DOOR,
+  name: 'Door',
+  message,
+  when: (BASE + offset + 0.4) / 1000,
+});
+
 // A card still waiting for its initial history: live events are buffered.
-function setup(limit = 20, entity = {}) {
+function setup(
+  limit = 20,
+  entity = {},
+  { streamError, historyRows = [], logbookEntries = [], others = [] } = {}
+) {
   const card = new TimelineCard();
   card.setConfig({
     hours: 12,
     limit,
     show_logbook_entries: true,
-    entities: [{ entity: DOOR, ...entity }],
+    entities: [{ entity: DOOR, ...entity }, ...others],
   });
   card.render = vi.fn();
   card.i18n = new TranslationEngine({ 'en-us': {} });
   const listeners = {};
+  const requests = [];
   card.hassInst = {
     states: {
       [DOOR]: state('off', -1000),
@@ -60,10 +78,20 @@ function setup(limit = 20, entity = {}) {
     },
     connection: {
       subscribeEvents(callback, eventType) {
+        requests.push({ type: 'subscribe_events', event_type: eventType });
         listeners[eventType] = callback;
         return Promise.resolve(() => {});
       },
+      subscribeMessage(callback, message) {
+        requests.push(message);
+        if (streamError) return Promise.reject(streamError);
+        listeners[message.type] = callback;
+        return Promise.resolve(() => {});
+      },
     },
+    // What refreshInForeground() fetches: history/period and logbook/get_events.
+    callApi: () => Promise.resolve([historyRows]),
+    callWS: () => Promise.resolve(logbookEntries),
   };
   card.startLiveEvents();
 
@@ -78,13 +106,15 @@ function setup(limit = 20, entity = {}) {
   }
 
   function log(offset, message = 'Checked') {
-    listeners.logbook_entry({
-      data: { entity_id: DOOR, name: 'Door', message },
-      time_fired: stamp(offset),
-    });
+    listeners['logbook/event_stream']({ events: [logEntry(offset, message)] });
   }
 
-  return { card, emit, log };
+  // A raw batch, as logbook/event_stream sends it.
+  function stream(events) {
+    listeners['logbook/event_stream']({ events });
+  }
+
+  return { card, emit, log, stream, requests };
 }
 
 describe('replaying events buffered during the initial load', () => {
@@ -201,6 +231,178 @@ describe('live events after the initial load', () => {
     log(1001);
 
     expect(card.items).toHaveLength(2);
+  });
+});
+
+describe('live logbook subscription', () => {
+  it('uses logbook/event_stream, not a bus subscription non-admins are denied', () => {
+    const { requests } = setup();
+
+    expect(requests).toContainEqual({
+      type: 'logbook/event_stream',
+      start_time: expect.any(String),
+      entity_ids: [DOOR],
+    });
+    expect(requests).not.toContainEqual(
+      expect.objectContaining({ event_type: 'logbook_entry' })
+    );
+  });
+
+  it('admits only logbook.log entries for configured entities from a batch', () => {
+    const { card, stream } = setup();
+    card._historyReady = true;
+    const when = (offset) => (BASE + offset) / 1000;
+    stream([
+      { entity_id: DOOR, state: 'on', when: when(1000) },
+      {
+        entity_id: DOOR,
+        name: 'Door automation',
+        message: 'triggered by state of binary_sensor.door',
+        source: 'state of binary_sensor.door',
+        when: when(1100),
+      },
+      {
+        entity_id: 'light.other',
+        name: 'Other',
+        message: 'Hi',
+        when: when(1200),
+      },
+      { entity_id: DOOR, name: 'Door', message: 'First', when: when(1300) },
+      { entity_id: DOOR, name: 'Door', message: 'Second', when: when(1400) },
+    ]);
+
+    expect(card.items.map((i) => [i.state, i.time.getTime() - BASE])).toEqual([
+      ['Second', 1400],
+      ['First', 1300],
+    ]);
+  });
+
+  it('handles a rejected subscription instead of leaving it unhandled', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { card } = setup(20, {}, { streamError: new Error('Unauthorized') });
+
+    await expect(card.logbookUnsub).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      'timeline-card: logbook/event_stream failed',
+      expect.any(Error)
+    );
+    expect(() => card.disconnectedCallback()).not.toThrow();
+    warn.mockRestore();
+  });
+});
+
+describe('logbook stream overlap', () => {
+  it('ignores entries the stream replays after a reconnect', () => {
+    const { card, log } = setup();
+    card._historyReady = true;
+    log(1000);
+    log(2000, 'Other');
+    // Reconnected: same subscribe message, same start_time, same entries.
+    log(1000);
+    log(2000, 'Other');
+
+    expect(card.items.map((i) => i.state)).toEqual(['Other', 'Checked']);
+  });
+
+  it('still admits a genuinely new entry with the same message', () => {
+    const { card, log } = setup();
+    card._historyReady = true;
+    log(1000);
+    log(1000);
+    log(1001);
+
+    expect(card.items).toHaveLength(2);
+  });
+
+  it('keeps two different messages within the same millisecond', () => {
+    const { card, log } = setup();
+    card._historyReady = true;
+    log(1000, 'First');
+    log(1000, 'Second');
+
+    expect(card.items.map((i) => i.state)).toEqual(['Second', 'First']);
+  });
+
+  it('keeps entries of two entities within the same millisecond', () => {
+    const { card, stream } = setup(20, {}, { others: [{ entity: TARGET }] });
+    card._historyReady = true;
+    stream([logEntry(1000), { ...logEntry(1000), entity_id: TARGET }]);
+
+    expect(card.items.map((i) => i.id)).toEqual([TARGET, DOOR]);
+  });
+
+  it('admits an older entry that arrives late without having been shown', () => {
+    const { card, log } = setup();
+    card._historyReady = true;
+    log(2000, 'Newer');
+    log(1000, 'Older, delayed');
+
+    expect(card.items.map((i) => i.state)).toEqual(['Newer', 'Older, delayed']);
+  });
+
+  it('ignores a late initial batch already brought by the history load', async () => {
+    const { card, log } = setup(20, {}, { logbookEntries: [logEntry(1000)] });
+    await card.refreshInForeground();
+    // The subscribe's catch-up batch lands after the history load.
+    log(1000);
+    log(1500, 'After the load');
+
+    expect(card.items.map((i) => i.state)).toEqual([
+      'After the load',
+      'Checked',
+    ]);
+  });
+
+  it('keeps tracking a history logbook row the stream re-sends', async () => {
+    const { card, log, emit } = setup(
+      20,
+      { extra_text: '{sensor.target} °C' },
+      { logbookEntries: [logEntry(0)] }
+    );
+    log(0);
+    emit('16', 3, TARGET);
+    await card.refreshInForeground();
+
+    expect(card.items).toHaveLength(1);
+    expect(card.items[0].extra).toBe('16 °C');
+  });
+
+  it('starts the stream on the server clock, not a browser running ahead', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(BASE + 10 * 60 * 1000); // browser 10 min ahead
+    try {
+      const { requests } = setup();
+      const stream = requests.find((r) => r.type === 'logbook/event_stream');
+
+      // The newest last_updated HA has sent (the door's, at BASE - 1000).
+      expect(stream.start_time).toBe(stamp(-1000));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('logbook-stream helpers', () => {
+  it('logbookKey identifies an entry by entity, millisecond and message', () => {
+    const key = logbookKey(DOOR, BASE + 1000.4, 'Checked');
+    expect(logbookKey(DOOR, BASE + 1000.9, 'Checked')).toBe(key);
+    expect(logbookKey(DOOR, BASE + 1001, 'Checked')).not.toBe(key);
+    expect(logbookKey(TARGET, BASE + 1000.4, 'Checked')).not.toBe(key);
+    expect(logbookKey(DOOR, BASE + 1000.4, 'Other')).not.toBe(key);
+  });
+
+  it('logbookItemKey matches the key of the entry a cached row came from', () => {
+    const row = { id: DOOR, state: 'Checked', time: new Date(BASE + 1000) };
+    expect(logbookItemKey(row)).toBe(
+      logbookKey(DOOR, BASE + 1000.4, 'Checked')
+    );
+  });
+
+  it('streamStartTime falls back to the given clock without states', () => {
+    expect(streamStartTime({}, BASE)).toBe(stamp(0));
+    expect(streamStartTime({ a: { last_updated: 'garbage' } }, BASE)).toBe(
+      stamp(0)
+    );
   });
 });
 

@@ -65,6 +65,10 @@ function setup(overrides = {}) {
         listeners[eventType] = callback;
         return Promise.resolve(() => {});
       },
+      subscribeMessage(callback, message) {
+        listeners[message.type] = callback;
+        return Promise.resolve(() => {});
+      },
     },
   };
   card._historyReady = true;
@@ -92,9 +96,15 @@ function setup(overrides = {}) {
   }
 
   function log(offset, message = 'Setpoint applied') {
-    listeners.logbook_entry({
-      data: { entity_id: OWNER, name: 'Room', message },
-      time_fired: stamp(offset),
+    listeners['logbook/event_stream']({
+      events: [
+        {
+          entity_id: OWNER,
+          name: 'Room',
+          message,
+          when: Date.parse(stamp(offset)) / 1000,
+        },
+      ],
     });
   }
 

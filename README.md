@@ -439,7 +439,9 @@ previous value is not a state change, whatever wrote it.
 "Previous value" means the entity's real previous state, not the previous row
 left on screen: restart filtering runs before `include_states`,
 `exclude_states`, `min_value` and `max_value`. With `include_states: [on]`, a
-switch going `off → on → off → on` shows both activations.
+switch going `off → on → off → on` shows both activations. For the first row in
+the window, it's the value the entity carried into the window, so a restart
+repeat right at the window's start is dropped too.
 
 This is deliberately _not_ what `collapse_duplicates` does. That option is a
 display preference about runs of real events, and it decides which end of a run

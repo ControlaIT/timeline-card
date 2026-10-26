@@ -27,8 +27,13 @@ function shouldCollapse(cfg, globalConfig) {
 // real previous state, which is what `old_state` gives the live path. Judged
 // after include_states/min_value instead, `off → on → off → on` filtered to
 // `on` would read as `on → on` and lose every activation but the first.
-function dropRepeatedStates(list, entities, globalConfig) {
-  const lastStates = {};
+//
+// `carriedIn` seeds each entity's previous value with the one it carried into
+// the window (the contextOnly row, which stripUnavailableArtifacts() consumes
+// and never emits). Without it, a restart repeat that happens to be the first
+// row in the window has nothing to repeat and reads as a new event.
+function dropRepeatedStates(list, entities, globalConfig, carriedIn = {}) {
+  const lastStates = { ...carriedIn };
 
   return list.filter((item) => {
     if (item.kind === 'logbook') return true;
@@ -127,8 +132,13 @@ export function filterHistory(items, entities, limit, globalConfig = {}) {
   // pass must also precede dropRepeatedStates()/collapseDuplicates(), which
   // cannot see through the gap an `unavailable` opens in a run.
   let filtered = [...items].sort((a, b) => a.time - b.time);
+  const carriedIn = Object.fromEntries(
+    filtered
+      .filter((item) => item.contextOnly)
+      .map((item) => [item.id, item.raw_state])
+  );
   filtered = stripUnavailableArtifacts(filtered, entities, globalConfig);
-  filtered = dropRepeatedStates(filtered, entities, globalConfig);
+  filtered = dropRepeatedStates(filtered, entities, globalConfig, carriedIn);
 
   // `include_states` / `exclude_states` / `min_value` / `max_value` all select
   // on the state a row reports. A logbook entry reports none, so there is

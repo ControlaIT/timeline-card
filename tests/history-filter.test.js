@@ -294,6 +294,59 @@ describe('filterHistory: restart filtering before state filters', () => {
   });
 });
 
+describe('filterHistory: value carried into the window', () => {
+  const carried = (raw_state) => ({
+    id: 'binary_sensor.door',
+    raw_state,
+    time: 500,
+    contextOnly: true,
+  });
+
+  it('drops a first row that repeats the value carried into the window', () => {
+    // The window opens on a closed door; HA restarts cleanly and re-announces
+    // `closed` with no unavailable row in between. Nothing happened.
+    const items = [
+      carried('closed'),
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 2000 },
+      { id: 'binary_sensor.door', raw_state: 'open', time: 3000 },
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    expect(result.map((i) => [i.raw_state, i.time])).toEqual([['open', 3000]]);
+  });
+
+  it('keeps a first row that changes from the value carried in', () => {
+    const items = [
+      carried('closed'),
+      { id: 'binary_sensor.door', raw_state: 'open', time: 2000 },
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    expect(result.map((i) => [i.raw_state, i.time])).toEqual([['open', 2000]]);
+  });
+
+  it('never shows the carried-in row itself', () => {
+    const result = filterHistory([carried('closed')], [], 100, {});
+
+    expect(result).toEqual([]);
+  });
+
+  it('keeps the repeat when ignore_unavailable is off', () => {
+    const items = [
+      carried('closed'),
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 2000 },
+    ];
+
+    const result = filterHistory(items, [], 100, {
+      ignore_unavailable: false,
+    });
+
+    expect(result.map((i) => i.time)).toEqual([2000]);
+  });
+});
+
 describe('filterHistory with logbook entries', () => {
   const logbookItem = (time, state = 'Mensaje') => ({
     id: 'binary_sensor.door',

@@ -22,10 +22,23 @@ import {
   transformLogbook,
   transformLogbookEntry,
   isCustomLogbookEntry,
+  logbookEntryTime,
   shouldShowLogbook,
 } from './logbook-transform.js';
 import { transformHistory } from './history-transform.js';
 import { buildHistoryIndex } from './history-index.js';
+import { createLiveReferenceTracker } from './live-reference-engine.js';
+import { escapeHtml } from './html-escape.js';
+import {
+  logbookItemKey,
+  logbookKey,
+  streamStartTime,
+} from './logbook-stream.js';
+import {
+  findListed,
+  insertByTime,
+  orderPendingEvents,
+} from './pending-events.js';
 import { collectReferencedEntities } from './placeholder-engine.js';
 import { filterHistory, passesValueFilter } from './history-filter.js';
 
@@ -243,8 +256,13 @@ class TimelineCard extends HTMLElement {
     // first history load (cache or network) has populated `this.items`, then
     // replay them through the normal path so the dedup check has real data.
     this._historyReady = false;
-    this._pendingLiveEvents = [];
-    this._pendingLogbookEvents = [];
+    // State changes and logbook entries share one buffer, replayed in time
+    // order — see pending-events.js.
+    this._pendingEvents = [];
+
+    // Logbook entries already covered — see logbook-stream.js.
+    this._logbookSeen = new Set();
+    this._liveReferences = createLiveReferenceTracker();
 
     // Per-entity memory of the value held before an unavailable/unknown gap,
     // so the live path can recognise an unchanged value coming back the same
@@ -329,6 +347,9 @@ class TimelineCard extends HTMLElement {
     );
 
     if (cached) {
+      this._noteLogbookSeen(
+        cached.filter((item) => item.kind === 'logbook').map(logbookItemKey)
+      );
       this.items = cached;
       this.render();
       this._markHistoryReady();
@@ -358,6 +379,13 @@ class TimelineCard extends HTMLElement {
         : Promise.resolve([]),
     ]);
 
+    // Whatever this load brought, the stream mustn't add a second time.
+    this._noteLogbookSeen(
+      logbookEntries.map((entry) =>
+        logbookKey(entry.entity_id, logbookEntryTime(entry), entry.message)
+      )
+    );
+
     // Built from the raw response so referenced entities can be read at each
     // event's own timestamp rather than as they are now.
     const index = buildHistoryIndex(raw.data);
@@ -379,7 +407,7 @@ class TimelineCard extends HTMLElement {
         this.entities,
         this.hassInst,
         this.config,
-        (entityId, time) => index.at(entityId, time)
+        index
       )
     );
 
@@ -389,6 +417,10 @@ class TimelineCard extends HTMLElement {
       this.limit,
       this.config // includes collapse_duplicates
     );
+  }
+
+  _noteLogbookSeen(keys) {
+    for (const key of keys) this._logbookSeen.add(key);
   }
 
   async refreshInForeground() {
@@ -409,28 +441,67 @@ class TimelineCard extends HTMLElement {
 
   // Marks the initial history load as complete and replays any live events
   // that arrived while `this.items` was still empty/stale, through the same
-  // processLiveEvent() path used for events arriving after this point — so
-  // collapse_duplicates (and any other this.items-dependent logic) sees them
-  // in the same order they actually happened, compared against real data.
+  // processLiveEvent()/processLogbookEvent() paths used for events arriving
+  // after this point — so collapse_duplicates (and any other
+  // this.items-dependent logic) sees them in the order they actually happened,
+  // compared against real data. Both sources replay interleaved by time; an
+  // event the history response already carried isn't inserted again (see
+  // pending-events.js), checked against `_replayBaseline` — the rows that were
+  // there before the replay, and only during it.
   _markHistoryReady() {
     if (this._historyReady) return;
     this._historyReady = true;
 
-    const pending = this._pendingLiveEvents;
-    this._pendingLiveEvents = [];
-    for (const data of pending) {
-      this.processLiveEvent(data);
-    }
-
-    const pendingLogbook = this._pendingLogbookEvents;
-    this._pendingLogbookEvents = [];
-    for (const msg of pendingLogbook) {
-      this.processLogbookEvent(msg);
+    const pending = orderPendingEvents(this._pendingEvents);
+    this._pendingEvents = [];
+    this._replayBaseline = [...this.items];
+    try {
+      for (const event of pending) {
+        if (event.kind === 'logbook') {
+          this.processLogbookEvent(event.payload);
+        } else {
+          this.processLiveEvent(event.payload);
+        }
+      }
+    } finally {
+      this._replayBaseline = null;
     }
   }
 
+  // Puts a live row in the list — or, when it's a replayed event the history
+  // already carried, keeps that row instead. Either way the row is tracked, so
+  // a referenced sensor written just after the event still updates its label:
+  // the history row was built before that write reached the recorder.
+  //
+  // `known` marks a logbook entry the card has already covered (see
+  // logbook-stream.js): it's never inserted, only matched against the current
+  // list so its row stays tracked. Returns whether a row was inserted.
+  _insertLiveItem(item, transform, { known = false } = {}) {
+    const baseline = known ? this.items : this._replayBaseline;
+    const listed = baseline && findListed(baseline, item);
+    if (known && !listed) return false;
+
+    const row = listed || item;
+    if (!listed) insertByTime(this.items, item);
+    this._liveReferences.track(row, this.hassInst.states, transform);
+
+    if (this.limit && this.items.length > this.limit) {
+      this.items = this.items.slice(0, this.limit);
+    }
+    return !listed;
+  }
+
+  // Runs unattended — from the cache path and `refresh_interval` — so nothing
+  // awaits it: a failure (HA restarting, the connection down) is logged and the
+  // rows on screen stay as they are until the next refresh succeeds.
   async refreshInBackground() {
-    const items = await this._buildItems();
+    let items;
+    try {
+      items = await this._buildItems();
+    } catch (err) {
+      console.warn('timeline-card: refresh failed', err);
+      return;
+    }
 
     if (JSON.stringify(items) === JSON.stringify(this.items)) return;
 
@@ -456,18 +527,27 @@ class TimelineCard extends HTMLElement {
 
   startLiveEvents() {
     const entityIds = this.entities.map((e) => e.entity);
+    const watchedIds = new Set([...entityIds, ...this.referencedEntities]);
 
     this.liveUnsub = this.hassInst.connection.subscribeEvents((msg) => {
       const data = msg?.data;
       if (!data?.entity_id) return;
-      if (!entityIds.includes(data.entity_id)) return;
+      if (!watchedIds.has(data.entity_id)) return;
+
+      // Attribute-only updates keep last_changed: use the event timestamp for
+      // the reference window, including when replaying a buffered event.
+      const timedData = { ...data, time_fired: msg.time_fired };
 
       if (!this._historyReady) {
-        this._pendingLiveEvents.push(data);
+        this._pendingEvents.push({
+          kind: 'state',
+          time: Date.parse(msg.time_fired),
+          payload: timedData,
+        });
         return;
       }
 
-      this.processLiveEvent(data);
+      this.processLiveEvent(timedData);
     }, 'state_changed');
 
     if (!this.logbookEnabled) return;
@@ -476,58 +556,111 @@ class TimelineCard extends HTMLElement {
     // it needs a subscription of its own — without it these rows would only
     // appear on the next poll, and not at all on a card with no
     // `refresh_interval`.
-    this.logbookUnsub = this.hassInst.connection.subscribeEvents((msg) => {
-      const data = msg?.data;
-      if (!data?.entity_id) return;
-      if (!entityIds.includes(data.entity_id)) return;
+    //
+    // Not a raw subscribe_events on `logbook_entry`: Home Assistant only lets
+    // non-admin users subscribe to an allowlist of bus events, and that one
+    // isn't on it. `logbook/event_stream` is the logbook's own subscription,
+    // open to every user, and carries the same entries `logbook/get_events`
+    // returns — state rows and automation triggers included, which
+    // processLogbookEvent() filters out exactly as the history load does.
+    // Started on the server's clock, and deduplicated against what the card
+    // already has — see logbook-stream.js.
+    this.logbookUnsub = this.hassInst.connection
+      .subscribeMessage(
+        (msg) => {
+          for (const entry of msg?.events ?? []) {
+            if (!entityIds.includes(entry?.entity_id)) continue;
 
-      if (!this._historyReady) {
-        this._pendingLogbookEvents.push(msg);
-        return;
-      }
+            if (!this._historyReady) {
+              this._pendingEvents.push({
+                kind: 'logbook',
+                // 0 is logbookEntryTime()'s "unreadable": sorted last, not first.
+                time: logbookEntryTime(entry) || NaN,
+                payload: entry,
+              });
+              continue;
+            }
 
-      this.processLogbookEvent(msg);
-    }, 'logbook_entry');
+            this.processLogbookEvent(entry);
+          }
+        },
+        {
+          type: 'logbook/event_stream',
+          start_time: streamStartTime(this.hassInst.states),
+          entity_ids: entityIds,
+        }
+      )
+      // A failed subscription (an HA without the command, the recorder off)
+      // costs only the live logbook rows; history and polling still bring
+      // them, as with fetchLogbook().
+      .catch((err) => {
+        console.warn('timeline-card: logbook/event_stream failed', err);
+        return null;
+      });
   }
 
-  processLogbookEvent(msg) {
-    const data = msg?.data;
-    if (!isCustomLogbookEntry(data)) return;
+  processLogbookEvent(entry) {
+    if (!isCustomLogbookEntry(entry)) return;
 
-    const cfg = this.entities.find((e) => e.entity === data.entity_id);
+    const cfg = this.entities.find((e) => e.entity === entry.entity_id);
     if (!shouldShowLogbook(cfg, this.config)) return;
 
-    // The bus payload is `{name, message, domain, entity_id}` — it has no
-    // `when`, so the time comes off the event envelope. `time_fired` is an ISO
-    // string here, unlike the epoch float `logbook/get_events` returns.
-    const firedAt = Date.parse(msg.time_fired);
-    const timeMs = Number.isNaN(firedAt) ? Date.now() : firedAt;
+    // Stream entries carry `when` like the ones logbook/get_events returns, so
+    // live and history rows share one clock.
+    const timeMs = logbookEntryTime(entry) || Date.now();
 
-    const item = transformLogbookEntry(
-      data,
-      this.hassInst,
-      this.entities,
-      timeMs,
+    // Already shown — by the history load, or by the stream before a
+    // reconnect made it replay everything since `start_time`.
+    const key = logbookKey(entry.entity_id, timeMs, entry.message);
+    const known = this._logbookSeen.has(key);
+    this._logbookSeen.add(key);
+
+    this._liveReferences.update({
+      entityId: entry.entity_id,
+      time: timeMs,
+      items: this.items,
+    });
+
+    const transform = (resolveEntity) =>
+      transformLogbookEntry(
+        entry,
+        this.hassInst,
+        this.entities,
+        timeMs,
+        resolveEntity
+      );
+    const item = transform(
       (entityId) => this.hassInst?.states?.[entityId] ?? null
     );
 
     // No `old_state` parity check and no collapse_duplicates pass, unlike
     // processLiveEvent(): neither applies to something that isn't a state
-    // change. Two identical messages are two things that happened twice.
-    this.items.unshift(item);
-
-    if (this.limit && this.items.length > this.limit) {
-      this.items = this.items.slice(0, this.limit);
-    }
-
-    this.render();
+    // change. Two identical messages are two things that happened twice — but
+    // the same entry replayed after the history already brought it is one.
+    if (this._insertLiveItem(item, transform, { known })) this.render();
   }
 
   processLiveEvent(data) {
     const entityId = data.entity_id;
     const newState = data.new_state;
+    const time = Date.parse(
+      data.time_fired ?? newState?.last_updated ?? newState?.last_changed
+    );
+    if (
+      this._liveReferences.update({
+        entityId,
+        time,
+        items: this.items,
+        newState,
+        closePrevious: data.old_state?.state !== newState?.state,
+      })
+    ) {
+      this.render();
+    }
 
     const cfg = this.entities.find((e) => e.entity === entityId);
+    // Referenced entities participate in label updates, not in the timeline.
+    if (!cfg || !newState) return;
 
     // --- HA logbook parity (components/logbook/queries/common.py) ---
     // The logbook keeps a state row only when
@@ -571,16 +704,16 @@ class TimelineCard extends HTMLElement {
     }
     // ---------------------------------------------
 
-    const item = transformState(
-      entityId,
-      newState,
-      this.hassInst,
-      this.entities,
-      this.i18n,
-      // The event just happened, so the current states ARE the states at its
-      // point in time — no history lookup needed on this path.
-      (id) => this.hassInst?.states?.[id] ?? null
-    );
+    const transform = (resolveEntity) =>
+      transformState(
+        entityId,
+        newState,
+        this.hassInst,
+        this.entities,
+        this.i18n,
+        resolveEntity
+      );
+    const item = transform((id) => this.hassInst?.states?.[id] ?? null);
 
     if (!item) return;
 
@@ -596,18 +729,14 @@ class TimelineCard extends HTMLElement {
     }
     // -------------------------------------------------
 
-    // Insert new event at the top
-    this.items.unshift(item);
-
-    // Limit size
-    if (this.limit && this.items.length > this.limit) {
-      this.items = this.items.slice(0, this.limit);
-    }
-
+    // At its place by time, or not at all when the replay finds the history
+    // already brought it — trimmed to `limit` either way.
+    this._insertLiveItem(item, transform);
     this.render();
   }
 
   disconnectedCallback() {
+    this._liveReferences?.clear();
     if (this.refreshTimer) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
@@ -765,7 +894,7 @@ class TimelineCard extends HTMLElement {
       // attribute) is dropped rather than drawn empty — otherwise it leaves a
       // gap in the meta row on one side of the timeline and not the other.
       const extraHtml = item.extra
-        ? `<div class="secondary-text extra">${item.extra}</div>`
+        ? `<div class="secondary-text extra">${escapeHtml(item.extra)}</div>`
         : ``;
 
       // `force_multiline` gives every field its own line, so the meta row is
@@ -779,12 +908,12 @@ class TimelineCard extends HTMLElement {
         : `${timeHtml}${extraHtml}`;
 
       const renderEventBox = () => `
-        <div class="${eventBoxClassName}" data-entity-id="${item.id}">
+        <div class="${eventBoxClassName}" data-entity-id="${escapeHtml(item.id)}">
           ${
             showIcons
               ? showEntityPicture
-                ? `<img class="entity-picture" src="${entityPicture}" alt="">`
-                : `<ha-icon icon="${item.icon}" style="color:${item.icon_color};"></ha-icon>`
+                ? `<img class="entity-picture" src="${escapeHtml(entityPicture)}" alt="">`
+                : `<ha-icon icon="${escapeHtml(item.icon)}" style="color:${escapeHtml(item.icon_color)};"></ha-icon>`
               : ``
           }
           <div class="text">
@@ -793,7 +922,7 @@ class TimelineCard extends HTMLElement {
                 showNames
                   ? `<div class="primary-text name" style="${
                       nameColor ? `color:${nameColor};` : ''
-                    }">${item.name}</div>`
+                    }">${escapeHtml(item.name)}</div>`
                   : ``
               }
               ${
@@ -801,10 +930,10 @@ class TimelineCard extends HTMLElement {
                   ? showNames
                     ? `<div class="secondary-text state" style="${
                         stateColor ? `color:${stateColor};` : ''
-                      }">${item.state}</div>`
+                      }">${escapeHtml(item.state)}</div>`
                     : `<div class="primary-text state" style="${
                         stateColor ? `color:${stateColor};` : ''
-                      }">${this.capitalize(item.state)}</div>`
+                      }">${escapeHtml(this.capitalize(item.state))}</div>`
                   : ``
               }
             </div>

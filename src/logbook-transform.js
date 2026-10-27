@@ -10,6 +10,7 @@ import { getEntityName } from './name-engine.js';
 import { getCustomConfig } from './config-engine.js';
 import { getLogbookIcon, getLogbookIconColor } from './icon-engine.js';
 import { interpolate } from './placeholder-engine.js';
+import { referenceLookahead } from './history-index.js';
 
 /**
  * True for entries written by the `logbook.log` service.
@@ -110,29 +111,38 @@ export function shouldShowLogbook(cfg, globalConfig = {}) {
  * Raw `logbook/get_events` response → timeline items, ready to be concatenated
  * onto the history items before filterHistory() sorts and limits them all
  * together.
+ *
+ * `index` (history-index.js) resolves `extra_text` placeholders against what
+ * other entities held at the entry's time, with the same lookahead as history
+ * rows — capped at the entity's next row, whether a state change or another
+ * logbook entry.
  */
 export function transformLogbook(
   entries,
   entities,
   hass,
   globalConfig = {},
-  resolveEntityAt
+  index
 ) {
   if (!Array.isArray(entries)) return [];
 
+  const admitted = entries
+    .filter(isCustomLogbookEntry)
+    .filter((entry) =>
+      shouldShowLogbook(
+        getCustomConfig(entry.entity_id, entities),
+        globalConfig
+      )
+    )
+    .map((entry) => ({ entry, timeMs: logbookEntryTime(entry) }))
+    .filter(({ timeMs }) => timeMs);
+
   const items = [];
 
-  for (const entry of entries) {
-    if (!isCustomLogbookEntry(entry)) continue;
-
-    const cfg = getCustomConfig(entry.entity_id, entities);
-    if (!shouldShowLogbook(cfg, globalConfig)) continue;
-
-    const timeMs = logbookEntryTime(entry);
-    if (!timeMs) continue;
-
-    const resolveEntity = resolveEntityAt
-      ? (entityId) => resolveEntityAt(entityId, timeMs)
+  for (const { entry, timeMs } of admitted) {
+    const lookahead = index ? lookaheadFor(entry, timeMs, admitted, index) : 0;
+    const resolveEntity = index
+      ? (entityId) => index.at(entityId, timeMs, lookahead)
       : undefined;
     items.push(
       transformLogbookEntry(entry, hass, entities, timeMs, resolveEntity)
@@ -140,4 +150,19 @@ export function transformLogbook(
   }
 
   return items;
+}
+
+// The entity's next row after this entry: its next state change or its next
+// logbook entry, whichever comes first.
+function lookaheadFor(entry, timeMs, admitted, index) {
+  const candidates = admitted
+    .filter((o) => o.entry.entity_id === entry.entity_id && o.timeMs > timeMs)
+    .map((o) => o.timeMs);
+  const nextState = index.nextAfter(entry.entity_id, timeMs);
+  if (nextState != null) candidates.push(nextState);
+
+  return referenceLookahead(
+    timeMs,
+    candidates.length ? Math.min(...candidates) : null
+  );
 }

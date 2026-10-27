@@ -227,6 +227,126 @@ describe('filterHistory', () => {
 // A logbook.log entry reports a message, not a state. Every filter below
 // selects on state, so each has to let it through untouched — otherwise the
 // entries are fetched and normalised only to be dropped before rendering.
+describe('filterHistory: restart filtering before state filters', () => {
+  const toggles = (id, states) =>
+    states.map((raw_state, i) => ({ id, raw_state, time: (i + 1) * 1000 }));
+
+  it('keeps every activation when include_states hides the steps between', () => {
+    const items = toggles('switch.pump', ['off', 'on', 'off', 'on']);
+
+    const result = filterHistory(
+      items,
+      [{ entity: 'switch.pump', include_states: ['on'] }],
+      100,
+      {}
+    );
+
+    expect(result.map((i) => i.time)).toEqual([4000, 2000]);
+  });
+
+  it('keeps every value in range when min_value hides the ones between', () => {
+    const items = toggles('sensor.power', ['10', '30', '10', '30']);
+
+    const result = filterHistory(
+      items,
+      [{ entity: 'sensor.power', min_value: 20 }],
+      100,
+      {}
+    );
+
+    expect(result.map((i) => i.time)).toEqual([4000, 2000]);
+  });
+
+  it('still drops a real repeat that survives include_states', () => {
+    // on → on (restart, no unavailable recorded) → off: the second `on` is the
+    // artifact, judged against the entity's real previous state.
+    const items = toggles('switch.pump', ['on', 'on', 'off']);
+
+    const result = filterHistory(
+      items,
+      [{ entity: 'switch.pump', include_states: ['on'] }],
+      100,
+      {}
+    );
+
+    expect(result.map((i) => i.time)).toEqual([1000]);
+  });
+
+  it('leaves collapse_duplicates collapsing what is displayed, as upstream', () => {
+    // collapse_duplicates is a display preference over the filtered events:
+    // with `off` hidden, the two `on` rows read as one run.
+    const items = toggles('switch.pump', ['off', 'on', 'off', 'on']);
+
+    const result = filterHistory(
+      items,
+      [
+        {
+          entity: 'switch.pump',
+          include_states: ['on'],
+          collapse_duplicates: true,
+        },
+      ],
+      100,
+      {}
+    );
+
+    expect(result.map((i) => i.time)).toEqual([2000]);
+  });
+});
+
+describe('filterHistory: value carried into the window', () => {
+  const carried = (raw_state) => ({
+    id: 'binary_sensor.door',
+    raw_state,
+    time: 500,
+    contextOnly: true,
+  });
+
+  it('drops a first row that repeats the value carried into the window', () => {
+    // The window opens on a closed door; HA restarts cleanly and re-announces
+    // `closed` with no unavailable row in between. Nothing happened.
+    const items = [
+      carried('closed'),
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 2000 },
+      { id: 'binary_sensor.door', raw_state: 'open', time: 3000 },
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    expect(result.map((i) => [i.raw_state, i.time])).toEqual([['open', 3000]]);
+  });
+
+  it('keeps a first row that changes from the value carried in', () => {
+    const items = [
+      carried('closed'),
+      { id: 'binary_sensor.door', raw_state: 'open', time: 2000 },
+    ];
+
+    const result = filterHistory(items, [], 100, {});
+
+    expect(result.map((i) => [i.raw_state, i.time])).toEqual([['open', 2000]]);
+  });
+
+  it('never shows the carried-in row itself', () => {
+    const result = filterHistory([carried('closed')], [], 100, {});
+
+    expect(result).toEqual([]);
+  });
+
+  it('keeps the repeat when ignore_unavailable is off', () => {
+    const items = [
+      carried('closed'),
+      { id: 'binary_sensor.door', raw_state: 'closed', time: 2000 },
+    ];
+
+    const result = filterHistory(items, [], 100, {
+      ignore_unavailable: false,
+    });
+
+    expect(result.map((i) => i.time)).toEqual([2000]);
+  });
+});
+
 describe('filterHistory with logbook entries', () => {
   const logbookItem = (time, state = 'Mensaje') => ({
     id: 'binary_sensor.door',

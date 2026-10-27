@@ -436,10 +436,19 @@ attribute-only change rather than a real transition. The `history` API exposes n
 `old_state`, so there the card applies the half it can check: a repeat of the
 previous value is not a state change, whatever wrote it.
 
+"Previous value" means the entity's real previous state, not the previous row
+left on screen: restart filtering runs before `include_states`,
+`exclude_states`, `min_value` and `max_value`. With `include_states: [on]`, a
+switch going `off → on → off → on` shows both activations. For the first row in
+the window, it's the value the entity carried into the window, so a restart
+repeat right at the window's start is dropped too.
+
 This is deliberately _not_ what `collapse_duplicates` does. That option is a
 display preference about runs of real events, and it decides which end of a run
 to keep — which is why it stays opt-in, and why turning it on is not a fix for
-restart noise. Where a repeated value is concerned they overlap: with
+restart noise. It also works on what's displayed: with `include_states: [on]`
+and `collapse_duplicates` on, those two activations read as one run and
+collapse. Where a repeated value is concerned they overlap: with
 `collapse_duplicates` on for an entity, its `collapse_duplicates_keep` setting
 wins, so a run still resolves to your chosen end of it.
 
@@ -542,7 +551,12 @@ Use `logbook_icon` / `logbook_icon_color` per entity when you want these rows to
 stand out from the state changes around them.
 
 New events appear immediately, without waiting for `refresh_interval` — the card
-subscribes to the `logbook_entry` bus event alongside `state_changed`.
+subscribes to the logbook's own event stream (`logbook/event_stream`) alongside
+`state_changed`. That works for every Home Assistant user: non-admin users can't
+subscribe to the raw `logbook_entry` bus event. The stream starts on Home
+Assistant's clock rather than the browser's, and entries the card already shows
+are ignored when the stream resends them after a reconnect. If the subscription
+fails, new entries still arrive with the next refresh.
 
 ---
 
@@ -728,6 +742,19 @@ Notes:
   on screen.
 - A referenced entity that never changed during the window still resolves: the
   history response includes the value it carried into the range.
+- **A change up to 2 seconds after the event still counts as its value.** An
+  entity derived from the event's own one — a template sensor over a climate's
+  `temperature` — is written a few milliseconds later, so at the event's exact
+  timestamp it still holds the previous value: switching to `heat` at 16 °C
+  would otherwise read `Heat - 25 °C`. The margin stops at the same entity's
+  next event: a change from there on belongs to that one, so two setpoints a
+  second apart each keep their own value. The same margin applies to Logbook
+  entries.
+- **Live rows also settle during that margin.** If a referenced entity changes
+  after a row appears, its label and extra text are recalculated from that
+  update. Other reference values and the row's own attributes stay as captured
+  for that event. Updates stop after 2 seconds or when the same entity produces
+  its next state change or Logbook entry.
 - Filters (`include_states`, `collapse_duplicates`, colors, icons) all still work
   off the **raw** state, not the rendered label.
 

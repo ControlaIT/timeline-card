@@ -6,6 +6,7 @@ import {
   shouldShowLogbook,
   transformLogbook,
 } from '../src/logbook-transform.js';
+import { buildHistoryIndex } from '../src/history-index.js';
 
 // Payloads captured verbatim from a live `logbook/get_events` call against the
 // Numa Granada Vega installation, so the shapes tested here are the shapes HA
@@ -293,5 +294,81 @@ describe('transformLogbook', () => {
   it('tolerates a non-array response', () => {
     expect(transformLogbook(undefined, entities, hass, {})).toEqual([]);
     expect(transformLogbook(null, entities, hass, {})).toEqual([]);
+  });
+
+  describe('extra_text placeholders of another entity', () => {
+    const cfg = [
+      {
+        entity: 'binary_sensor.numa_granadavega_401_motion_group',
+        show_logbook_entries: true,
+        extra_text: 'Consigna: {sensor.target} °C',
+      },
+    ];
+    const entryAt = MANUAL_ENTRY.when * 1000;
+    const iso = (ms) => new Date(ms).toISOString();
+
+    const run = (changedAfterMs) => {
+      const index = buildHistoryIndex([
+        [
+          {
+            entity_id: 'sensor.target',
+            state: '25.0',
+            last_changed: iso(entryAt - 60000),
+          },
+          {
+            entity_id: 'sensor.target',
+            state: '16.0',
+            last_changed: iso(entryAt + changedAfterMs),
+          },
+        ],
+      ]);
+      return transformLogbook([MANUAL_ENTRY], cfg, hass, {}, index)[0].extra;
+    };
+
+    it('takes a value the referenced entity took just after the entry', () => {
+      expect(run(3)).toBe('Consigna: 16.0 °C');
+    });
+
+    it('ignores a change of the referenced entity well after the entry', () => {
+      expect(run(15000)).toBe('Consigna: 25.0 °C');
+    });
+
+    it("doesn't lend the next row's value to the entry before it", () => {
+      const index = buildHistoryIndex([
+        [
+          {
+            entity_id: 'sensor.target',
+            state: '25.0',
+            last_changed: iso(entryAt - 60000),
+          },
+          {
+            entity_id: 'sensor.target',
+            state: '16.0',
+            last_changed: iso(entryAt + 2),
+          },
+          {
+            entity_id: 'sensor.target',
+            state: '21.0',
+            last_changed: iso(entryAt + 1002),
+          },
+        ],
+        [
+          {
+            entity_id: MANUAL_ENTRY.entity_id,
+            state: 'on',
+            last_changed: iso(entryAt + 1000),
+          },
+        ],
+      ]);
+      const second = { ...MANUAL_ENTRY, when: (entryAt + 500) / 1000 };
+
+      // The next logbook entry 500 ms later caps the first; the state change at
+      // +1000 ms caps the second.
+      expect(
+        transformLogbook([MANUAL_ENTRY, second], cfg, hass, {}, index).map(
+          (i) => i.extra
+        )
+      ).toEqual(['Consigna: 16.0 °C', 'Consigna: 16.0 °C']);
+    });
   });
 });

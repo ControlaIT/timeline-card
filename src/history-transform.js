@@ -1,4 +1,5 @@
 import { transformState } from './state-transform.js';
+import { referenceLookahead } from './history-index.js';
 
 /**
  * Transform HA history API result into a unified flat list
@@ -7,7 +8,8 @@ import { transformState } from './state-transform.js';
  * `index` is the point-in-time lookup over the same response (see
  * history-index.js). Each entry resolves its `state_map` placeholders against
  * the values other entities held at that entry's own timestamp, so a past event
- * reports what was true when it happened.
+ * reports what was true when it happened — allowing a short lookahead
+ * (referenceLookahead()) for entities HA writes just after the event's own.
  *
  * `history/period` backfills a synthetic first row per entity, timestamped
  * exactly at the query's `start`, carrying whatever value the entity held going
@@ -37,8 +39,14 @@ export function transformHistory(
     if (!shown.has(entityList[0]?.entity_id)) return;
 
     entityList.forEach((entry) => {
+      const lookahead = index
+        ? referenceLookahead(
+            entry.last_changed,
+            index.nextAfter(entry.entity_id, entry.last_changed)
+          )
+        : 0;
       const resolveEntity = index
-        ? (entityId) => index.at(entityId, entry.last_changed)
+        ? (entityId) => index.at(entityId, entry.last_changed, lookahead)
         : undefined;
 
       // Use unified transform for both history and live events
